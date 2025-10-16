@@ -1,3 +1,6 @@
+import React, { useState } from "react";
+import { Search, Upload, Eye, Download } from "lucide-react";
+
 const RecordsPage = ({ user }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");

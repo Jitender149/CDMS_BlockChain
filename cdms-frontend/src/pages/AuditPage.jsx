@@ -1,3 +1,12 @@
+import React from "react";
+import {
+  Activity,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Shield,
+} from "lucide-react";
+
 const AuditPage = ({ user }) => {
   const auditLogs = [
     {

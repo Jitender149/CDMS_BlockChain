@@ -1,3 +1,6 @@
+import React, { useState } from "react";
+import { Upload, Lock, Shield } from "lucide-react";
+
 const UploadPage = ({ user }) => {
   const [formData, setFormData] = useState({
     caseId: "",

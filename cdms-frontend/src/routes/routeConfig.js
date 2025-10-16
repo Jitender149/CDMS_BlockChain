@@ -1,5 +1,7 @@
 // src/routes/routeConfig.js
 
+import { Activity, FileText, Upload, Database, Users } from "lucide-react";
+
 import DashboardPage from "../pages/DashboardPage";
 import AccessManagementPage from "../pages/AccessManagementPage";
 import AuditPage from "../pages/AuditPage";
@@ -11,31 +13,48 @@ export const ROUTES = [
   {
     path: "/dashboard",
     element: DashboardPage,
-    roles: ["Admin", "Forensics", "Investigator"], // All roles can access
+    label: "Dashboard",
+    icon: Activity,
+    roles: ["Admin", "Forensics", "Investigator"],
+    showInSidebar: true, // Show in Sidebar
   },
   {
     path: "/access-management",
     element: AccessManagementPage,
-    roles: ["Admin"], // Only Admin can access
+    label: "Access Management",
+    icon: Users,
+    roles: ["Admin"],
+    showInSidebar: true, // Show in Sidebar
   },
   {
     path: "/audit",
     element: AuditPage,
-    roles: ["Admin", "Forensics"], // Admin and Forensics can access
+    label: "Audit Trail",
+    icon: Database,
+    roles: ["Admin", "Forensics"],
+    showInSidebar: true, // Show in Sidebar
   },
   {
     path: "/login",
     element: LoginPage,
-    roles: [], // Public route, no roles required
+    label: "Login",
+    roles: [],
+    showInSidebar: false, // Do not show in Sidebar
   },
   {
     path: "/records",
     element: RecordsPage,
-    roles: ["Admin", "Forensics", "Investigator"], // All roles can access
+    label: "Records",
+    icon: FileText,
+    roles: ["Admin", "Forensics", "Investigator"],
+    showInSidebar: true, // Show in Sidebar
   },
   {
     path: "/upload",
     element: UploadPage,
-    roles: ["Admin", "Forensics"], // Admin and Forensics can access
+    label: "Upload",
+    icon: Upload,
+    roles: ["Admin", "Forensics"],
+    showInSidebar: true, // Show in Sidebar
   },
 ];

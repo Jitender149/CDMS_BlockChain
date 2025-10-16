@@ -1,3 +1,6 @@
+import React, { useState } from "react";
+import { Users, Shield } from "lucide-react";
+
 const AccessManagementPage = ({ user }) => {
   const [activeTab, setActiveTab] = useState("users");
 
