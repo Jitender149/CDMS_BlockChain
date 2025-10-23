@@ -7,6 +7,7 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
+const CDMSStorage = require('./storage');
 
 class CDMSBackend {
     constructor(config = {}) {
@@ -20,8 +21,12 @@ class CDMSBackend {
         this.vaultToken = config.vaultToken || process.env.VAULT_TOKEN;
         this.vaultMountPath = config.vaultMountPath || 'cdms-kms';
         
-        // Ensure files directory exists
-        this._ensureFilesDir();
+        // Initialize storage system
+        this.storage = new CDMSStorage({
+            useMinio: config.useMinio || process.env.USE_MINIO === 'true',
+            bucketName: config.bucketName || process.env.MINIO_BUCKET,
+            localPath: this.filesPath
+        });
     }
 
     async _ensureFilesDir() {
@@ -174,40 +179,17 @@ class CDMSBackend {
     }
 
     /**
-     * Store encrypted file on disk (later: MinIO)
+     * Store encrypted file using storage system
      */
     async storeEncryptedFile(recordId, encryptedData, iv, authTag) {
-        const metadata = {
-            iv: iv.toString('base64'),
-            authTag: authTag.toString('base64')
-        };
-        
-        // Store encrypted file
-        const filePath = path.join(this.filesPath, `${recordId}.enc`);
-        await fs.writeFile(filePath, encryptedData);
-        
-        // Store metadata separately
-        const metaPath = path.join(this.filesPath, `${recordId}.meta.json`);
-        await fs.writeFile(metaPath, JSON.stringify(metadata));
-        
-        return `file://${this.filesPath}/${recordId}.enc`;
+        return await this.storage.storeEncryptedFile(recordId, encryptedData, iv, authTag);
     }
 
     /**
-     * Retrieve encrypted file from disk
+     * Retrieve encrypted file using storage system
      */
     async retrieveEncryptedFile(recordId) {
-        const filePath = path.join(this.filesPath, `${recordId}.enc`);
-        const metaPath = path.join(this.filesPath, `${recordId}.meta.json`);
-        
-        const encryptedData = await fs.readFile(filePath);
-        const metadata = JSON.parse(await fs.readFile(metaPath, 'utf8'));
-        
-        return {
-            encryptedData,
-            iv: Buffer.from(metadata.iv, 'base64'),
-            authTag: Buffer.from(metadata.authTag, 'base64')
-        };
+        return await this.storage.retrieveEncryptedFile(recordId);
     }
 
     // ============================================
