@@ -19,9 +19,9 @@ async function registerForensicsOfficerB() {
     const walletPath = path.join(__dirname, 'wallet');
     const wallet = await Wallets.newFileSystemWallet(walletPath);
 
-    const userIdentity = await wallet.get('ForensicsOfficerB');
+    const userIdentity = await wallet.get('ForensicsOfficerA');
     if (userIdentity) {
-      console.log('Identity "ForensicsOfficerB" already exists in wallet');
+      console.log('Identity "ForensicsOfficerA" already exists in wallet');
       return;
     }
 
@@ -50,8 +50,9 @@ async function registerForensicsOfficerB() {
 
     console.log('✅ ForensicsOfficerB enrolled and added to wallet');
   } catch (error) {
-    console.error(`Failed to register ForensicsOfficerB: ${error}`);
-    process.exit(1);
+    console.error(`❌ Failed to register ForensicsOfficerB: ${error}`);
+    throw error;
   }
 }
-registerForensicsOfficerB();
+
+module.exports = registerForensicsOfficerB;

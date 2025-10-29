@@ -1,4 +1,39 @@
-# React + Vite
+
+# CDMS Frontend Setup (React + Vite)
+
+## Quickstart (Windows PowerShell)
+
+1. **Install dependencies**
+
+	Open a terminal in this folder and run:
+	```pwsh
+	npm install
+	```
+
+2. **If you see errors about missing dependencies (e.g. lucide-react):**
+
+	Install the missing package:
+	```pwsh
+	npm install lucide-react
+	```
+	(Repeat for any other missing packages reported by Vite)
+
+3. **Clear Vite cache if you see persistent dependency errors:**
+
+	```pwsh
+	Remove-Item -Recurse -Force .vite, .vite-temp, .\node_modules\.vite, .\node_modules\.vite-temp
+	```
+
+4. **Start the development server**
+
+	```pwsh
+	npm run dev
+	```
+	The app will be available at [http://localhost:5173/](http://localhost:5173/)
+
+---
+
+## About This Template
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

@@ -20,6 +20,11 @@ class CDMSBackend {
         this.vaultToken = config.vaultToken || process.env.VAULT_TOKEN;
         this.vaultMountPath = config.vaultMountPath || 'cdms-kms';
         
+        // Validate Vault configuration
+        if (!this.vaultToken) {
+            throw new Error('Vault token is required. Set VAULT_TOKEN environment variable or pass vaultToken in config');
+        }
+        
         // Ensure files directory exists
         this._ensureFilesDir();
     }
@@ -33,6 +38,43 @@ class CDMSBackend {
     }
 
     // ============================================
+    // VAULT HEALTH CHECK
+    // ============================================
+
+    /**
+     * Check Vault connectivity and authentication
+     */
+    async checkVaultHealth() {
+        try {
+            const response = await axios.get(
+                `${this.vaultAddr}/v1/sys/health`,
+                { 
+                    headers: { 'X-Vault-Token': this.vaultToken },
+                    validateStatus: () => true // Accept any status
+                }
+            );
+            
+            if (response.status === 200) {
+                console.log('✓ Vault is initialized, unsealed, and active');
+                return { healthy: true, sealed: false, initialized: true };
+            } else if (response.status === 429) {
+                console.log('⚠ Vault is unsealed and in standby mode');
+                return { healthy: true, sealed: false, initialized: true };
+            } else if (response.status === 501) {
+                console.log('✗ Vault is not initialized');
+                return { healthy: false, sealed: true, initialized: false };
+            } else if (response.status === 503) {
+                console.log('✗ Vault is sealed');
+                return { healthy: false, sealed: true, initialized: true };
+            }
+            
+            return { healthy: false, error: 'Unknown status' };
+        } catch (err) {
+            throw new Error(`Cannot connect to Vault at ${this.vaultAddr}: ${err.message}`);
+        }
+    }
+
+    // ============================================
     // VAULT KEY MANAGEMENT
     // ============================================
 
@@ -40,6 +82,12 @@ class CDMSBackend {
      * Initialize Vault transit engine (one-time setup)
      */
     async initVaultTransit() {
+        // Check Vault health first
+        const health = await this.checkVaultHealth();
+        if (!health.healthy) {
+            throw new Error('Vault is not ready. Please ensure Vault is initialized and unsealed.');
+        }
+
         try {
             // Enable transit secrets engine
             await axios.post(
@@ -49,9 +97,13 @@ class CDMSBackend {
             );
             console.log(`✓ Vault transit engine enabled at ${this.vaultMountPath}`);
         } catch (err) {
-            if (err.response?.status === 400 && err.response?.data?.errors?.[0]?.includes('already in use')) {
-                console.log(`✓ Vault transit engine already exists at ${this.vaultMountPath}`);
-            } else {
+            if (err.response?.status === 400 && (
+            err.response?.data?.errors?.[0]?.includes('already in use') ||
+            err.response?.data?.errors?.[0]?.includes('path is already in use')
+        )) {
+            console.log(`✓ Vault transit engine already exists at ${this.vaultMountPath}`);
+        }
+ else {
                 throw new Error(`Failed to enable Vault transit: ${err.message}`);
             }
         }
@@ -60,7 +112,11 @@ class CDMSBackend {
         try {
             await axios.post(
                 `${this.vaultAddr}/v1/${this.vaultMountPath}/keys/master-kek`,
-                { type: 'aes256-gcm96' },
+                { 
+                    type: 'aes256-gcm96',
+                    exportable: false, // Key cannot be exported
+                    allow_plaintext_backup: false // Enhanced security
+                },
                 { headers: { 'X-Vault-Token': this.vaultToken } }
             );
             console.log('✓ Master KEK created in Vault');
@@ -70,6 +126,20 @@ class CDMSBackend {
             } else {
                 throw new Error(`Failed to create KEK: ${err.message}`);
             }
+        }
+
+        // Enable key rotation policy (optional but recommended)
+        try {
+            await axios.post(
+                `${this.vaultAddr}/v1/${this.vaultMountPath}/keys/master-kek/config`,
+                { 
+                    auto_rotate_period: '2160h' // 90 days
+                },
+                { headers: { 'X-Vault-Token': this.vaultToken } }
+            );
+            console.log('✓ Auto-rotation policy set (90 days)');
+        } catch (err) {
+            console.warn('⚠ Could not set auto-rotation policy:', err.message);
         }
     }
 
@@ -121,6 +191,43 @@ class CDMSBackend {
             return Buffer.from(dekBase64, 'base64');
         } catch (err) {
             throw new Error(`Failed to unwrap key from Vault: ${err.message}`);
+        }
+    }
+
+    /**
+     * Rotate the master KEK (forces re-wrap of all DEKs)
+     */
+    async rotateKEK() {
+        try {
+            await axios.post(
+                `${this.vaultAddr}/v1/${this.vaultMountPath}/keys/master-kek/rotate`,
+                {},
+                { headers: { 'X-Vault-Token': this.vaultToken } }
+            );
+            console.log('✓ Master KEK rotated successfully');
+            return { success: true };
+        } catch (err) {
+            throw new Error(`Failed to rotate KEK: ${err.message}`);
+        }
+    }
+
+    /**
+     * Rewrap a DEK with the latest KEK version (after rotation)
+     */
+    async rewrapRecordKey(wrappedKey, recordId) {
+        try {
+            const response = await axios.post(
+                `${this.vaultAddr}/v1/${this.vaultMountPath}/rewrap/master-kek`,
+                { 
+                    ciphertext: wrappedKey,
+                    context: Buffer.from(recordId).toString('base64')
+                },
+                { headers: { 'X-Vault-Token': this.vaultToken } }
+            );
+
+            return response.data.data.ciphertext;
+        } catch (err) {
+            throw new Error(`Failed to rewrap key: ${err.message}`);
         }
     }
 
@@ -179,7 +286,8 @@ class CDMSBackend {
     async storeEncryptedFile(recordId, encryptedData, iv, authTag) {
         const metadata = {
             iv: iv.toString('base64'),
-            authTag: authTag.toString('base64')
+            authTag: authTag.toString('base64'),
+            timestamp: new Date().toISOString()
         };
         
         // Store encrypted file
@@ -188,7 +296,7 @@ class CDMSBackend {
         
         // Store metadata separately
         const metaPath = path.join(this.filesPath, `${recordId}.meta.json`);
-        await fs.writeFile(metaPath, JSON.stringify(metadata));
+        await fs.writeFile(metaPath, JSON.stringify(metadata, null, 2));
         
         return `file://${this.filesPath}/${recordId}.enc`;
     }
@@ -214,45 +322,57 @@ class CDMSBackend {
     // BLOCKCHAIN INTERACTION
     // ============================================
 
-    /**
-     * Get Fabric contract instance
-     */
-    async getContract(userId, org) {
-        let orgName, ccpPath;
-        
-        if (org === 'Org1') {
-            orgName = 'org1.example.com';
-        } else if (org === 'Org2') {
-            orgName = 'org2.example.com';
-        } else {
-            throw new Error(`Unknown organization: ${org}`);
-        }
+   /**
+ * Get Fabric contract instance (supports DistrictPoliceA & DistrictPoliceB)
+ */
+async getContract(userId, org) {
+    let orgName, orgLabel, ccpPath, mspId;
 
-        ccpPath = path.resolve(
-            __dirname,
-            `../fabric-samples/test-network/organizations/peerOrganizations/${orgName}/connection-${orgName}.json`
-        );
-        
-        const ccp = JSON.parse(await fs.readFile(ccpPath, 'utf8'));
-        const wallet = await Wallets.newFileSystemWallet(this.walletPath);
-
-        const identity = await wallet.get(userId);
-        if (!identity) {
-            throw new Error(`Identity ${userId} does not exist in wallet`);
-        }
-
-        const gateway = new Gateway();
-        await gateway.connect(ccp, {
-            wallet,
-            identity: userId,
-            discovery: { enabled: true, asLocalhost: true }
-        });
-
-        const network = await gateway.getNetwork(this.channelName);
-        const contract = network.getContract(this.contractName);
-
-        return { contract, gateway };
+    // Normalize org argument
+    if (org === 'DistrictPoliceA' || org === 'Org1' || org === 'A') {
+        orgName = 'org1.example.com';
+        orgLabel = 'Org1';
+        mspId = 'Org1MSP';
+    } else if (org === 'DistrictPoliceB' || org === 'Org2' || org === 'B') {
+        orgName = 'org2.example.com';
+        orgLabel = 'Org2';
+        mspId = 'Org2MSP';
+    } else {
+        throw new Error(`Unknown organization: ${org}`);
     }
+
+    // Load the corresponding connection profile
+    ccpPath = path.resolve(
+        __dirname,
+        `../fabric-samples/test-network/organizations/peerOrganizations/${orgName}/connection-${orgLabel.toLowerCase()}.json`
+    );
+
+
+    const ccp = JSON.parse(await fs.readFile(ccpPath, 'utf8'));
+    const wallet = await Wallets.newFileSystemWallet(this.walletPath);
+
+    const identity = await wallet.get(userId);
+    if (!identity) {
+        throw new Error(`Identity "${userId}" does not exist in wallet for ${orgLabel}`);
+    }
+
+    const gateway = new Gateway();
+    await gateway.connect(ccp, {
+        wallet,
+        identity: userId,
+        discovery: { enabled: true, asLocalhost: true }
+    });
+
+    const network = await gateway.getNetwork(this.channelName);
+    const contract = network.getContract(this.contractName);
+
+    console.log(`✅ Connected to Fabric network as ${userId} from ${orgLabel}`);
+
+    return { contract, gateway, mspId };
+}
+
+    
+
 
     // ============================================
     // HIGH-LEVEL OPERATIONS
@@ -306,7 +426,7 @@ class CDMSBackend {
             console.log(`[${recordId}] ✓ Upload complete`);
             
             return {
-                recordId: result.toString(),
+                recordId: recordId,
                 fileHash,
                 offchainUri,
                 status: 'success'
@@ -409,7 +529,6 @@ class CDMSBackend {
     async getAuditTrail(userId, org, recordId) {
         try {
             const { contract, gateway } = await this.getContract(userId, org);
-            // Note: You may need to add GetAuditTrail method to chaincode
             const result = await contract.evaluateTransaction('GetAuditTrail', recordId);
             await gateway.disconnect();
             
@@ -427,8 +546,11 @@ if (require.main === module) {
     (async () => {
         const backend = new CDMSBackend({
             vaultAddr: 'http://127.0.0.1:8200',
-            vaultToken: 'your-vault-token-here'
+            vaultToken: process.env.VAULT_TOKEN
         });
+
+        // Check Vault health
+        await backend.checkVaultHealth();
 
         // Initialize Vault (one-time)
         await backend.initVaultTransit();

@@ -50,8 +50,9 @@ async function registerForensicsOfficerA() {
 
     console.log('✅ ForensicsOfficerA enrolled and added to wallet');
   } catch (error) {
-    console.error(`Failed to register ForensicsOfficerA: ${error}`);
-    process.exit(1);
+    console.error(`❌ Failed to register ForensicsOfficerA: ${error}`);
+    throw error;
   }
 }
-registerForensicsOfficerA();
+
+module.exports = registerForensicsOfficerA;

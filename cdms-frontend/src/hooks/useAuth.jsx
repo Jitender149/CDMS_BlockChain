@@ -1,13 +1,12 @@
 import { useState, useContext, createContext } from "react";
+import { useNavigate } from "react-router-dom";
 
 const AuthContext = createContext(null);
 const API_URL = import.meta.env.VITE_APP_API_URL;
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState({
-    name: "John Doe",
-    role: "Admin", // or "User"
-  });
+  const [user, setUser] = useState(null);
+  const navigate = useNavigate();
 
   const login = async (credentials) => {
     try {
@@ -32,7 +31,9 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     setUser(null);
+    navigate("/login");
   };
+
 
   return (
     <AuthContext.Provider value={{ user, login, logout }}>

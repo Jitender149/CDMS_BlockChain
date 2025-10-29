@@ -4,22 +4,23 @@ import { useAuth } from "../hooks/useAuth.jsx";
 
 const LoginPage = () => {
   const { login } = useAuth();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [certificate, setCertificate] = useState(null);
+  const [org, setOrg] = useState("");
   const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username || !password) {
-      setError("Please enter username and password");
+    if (!email || !password || !org) {
+      setError("Please fill in all fields");
       return;
     }
+
     try {
-      await login({ username, password });
+      await login({ email, password, org }); // org now included
       setError("");
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.error || "Invalid credentials");
     }
   };
 
@@ -41,14 +42,15 @@ const LoginPage = () => {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Username / Officer ID
+                  Email ID
                 </label>
                 <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter your username"
+                  placeholder="Enter your email"
+                  required
                 />
               </div>
 
@@ -62,31 +64,41 @@ const LoginPage = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="Enter your password"
+                  required
                 />
               </div>
 
+              {/* Organization dropdown */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Certificate (Optional)
+                  Organization
                 </label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition cursor-pointer">
-                  <input
-                    type="file"
-                    onChange={(e) => setCertificate(e.target.files[0])}
-                    className="hidden"
-                    id="cert-upload"
-                    accept=".pem,.cert"
-                  />
-                  <label htmlFor="cert-upload" className="cursor-pointer">
-                    <Key className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-                    <p className="text-sm text-gray-600">
-                      {certificate
-                        ? certificate.name
-                        : "Upload Fabric CA Certificate"}
-                    </p>
-                  </label>
-                </div>
+                <select
+                  value={org}
+                  onChange={(e) => setOrg(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                >
+                  <option value="">Select Organization</option>
+                  <option value="A">District Police A</option>
+                  <option value="B">District Police B</option>
+                </select>
               </div>
+
+              {/* Optional Certificate Upload */}
+              {/* 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload Certificate (optional)
+                </label>
+                <input
+                  type="file"
+                  accept=".pem,.crt"
+                  onChange={(e) => setCertificate(e.target.files[0])}
+                  className="w-full text-gray-700"
+                />
+              </div>
+              */}
 
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
@@ -106,8 +118,14 @@ const LoginPage = () => {
 
             <div className="mt-6 text-center">
               <p className="text-xs text-gray-500">
-                Demo Users: admin, investigator, forensics | Password: any
+                Demo: admin@a.gov / investigator@b.gov
               </p>
+              <a
+                href="/register"
+                className="text-blue-600 hover:underline text-sm font-semibold block mt-2"
+              >
+                Don't have an account? Sign Up
+              </a>
             </div>
           </div>
         </div>
@@ -119,4 +137,5 @@ const LoginPage = () => {
     </div>
   );
 };
+
 export default LoginPage;

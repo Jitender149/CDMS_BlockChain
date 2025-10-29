@@ -5,6 +5,7 @@ import ProtectedRoute from "./ProtectedRoute";
 import LoginPage from "../pages/LoginPage";
 import UnauthorizedPage from "../pages/UnauthorizedPage";
 import MainLayout from "../components/layout/MainLayout";
+import RegisterPage from "../pages/RegisterPage";
 
 export default function AppRoutes() {
   const { user, login } = useAuth();
@@ -23,8 +24,14 @@ export default function AppRoutes() {
         }
       />
 
-      {/* Authenticated Routes */}
-      {ROUTES.map(({ path, element: Component, roles }) => (
+      {/* Public Route: Register */}
+      <Route
+        path="/register"
+        element={user ? <Navigate to="/dashboard" replace /> : <RegisterPage />}
+      />
+
+      {/* Authenticated Routes (excluding /register) */}
+      {ROUTES.filter(r => r.path !== "/register").map(({ path, element: Component, roles }) => (
         <Route
           key={path}
           path={path}

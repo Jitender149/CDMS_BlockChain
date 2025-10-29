@@ -1,106 +1,115 @@
+// registerDistrictPoliceA.js
 const FabricCAServices = require('fabric-ca-client');
 const { Wallets } = require('fabric-network');
 const fs = require('fs');
 const path = require('path');
 
-async function registerDistrictPoliceA() {
-    try {
-        // Load the connection profile for Org1 (District Police A)
-        const ccpPath = path.resolve(__dirname, '..', 'fabric-samples', 'test-network', 
-            'organizations', 'peerOrganizations', 'org1.example.com', 'connection-org1.json');
-        
-        const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
+async function getCAAndWallet() {
+  const ccpPath = path.resolve(__dirname, '..', 'fabric-samples', 'test-network',
+    'organizations', 'peerOrganizations', 'org1.example.com', 'connection-org1.json');
+  const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
 
-        // Create a new CA client for Org1
-        const caInfo = ccp.certificateAuthorities['ca.org1.example.com'];
-        const caTLSCACerts = caInfo.tlsCACerts.pem;
-        const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
+  const caInfo = ccp.certificateAuthorities['ca.org1.example.com'];
+  const caTLSCACerts = caInfo.tlsCACerts.pem;
+  const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
 
-        // Create wallet
-        const walletPath = path.join(__dirname, 'wallet');
-        const wallet = await Wallets.newFileSystemWallet(walletPath);
-        console.log(`Wallet path: ${walletPath}`);
+  const walletPath = path.join(__dirname, 'wallet');
+  const wallet = await Wallets.newFileSystemWallet(walletPath);
 
-        // ==================== STEP 1: Enroll Admin for Org1 ====================
-        console.log('\n--- Step 1: Enrolling Admin for Org1 ---');
-        
-        const adminIdentity = await wallet.get('AdminOrg1');
-        if (adminIdentity) {
-            console.log('Admin identity "AdminOrg1" already exists in the wallet');
-        } else {
-            // Enroll the admin user
-            const adminEnrollment = await ca.enroll({ 
-                enrollmentID: 'admin', 
-                enrollmentSecret: 'adminpw' 
-            });
-            
-            const adminX509Identity = {
-                credentials: {
-                    certificate: adminEnrollment.certificate,
-                    privateKey: adminEnrollment.key.toBytes(),
-                },
-                mspId: 'Org1MSP',
-                type: 'X.509',
-            };
-            
-            await wallet.put('AdminOrg1', adminX509Identity);
-            console.log('Successfully enrolled admin user "AdminOrg1" for Org1 and imported it into the wallet');
-        }
-
-        // ==================== STEP 2: Register and Enroll DistrictPoliceA ====================
-        console.log('\n--- Step 2: Registering and Enrolling DistrictPoliceA User ---');
-        
-        // Check if District Police A user already exists
-        const userIdentity = await wallet.get('DistrictPoliceA');
-        if (userIdentity) {
-            console.log('User identity "DistrictPoliceA" already exists in the wallet');
-            return;
-        }
-
-        // Get admin identity for registration
-        const adminIdentityForReg = await wallet.get('AdminOrg1');
-        const provider = wallet.getProviderRegistry().getProvider(adminIdentityForReg.type);
-        const adminUser = await provider.getUserContext(adminIdentityForReg, 'AdminOrg1');
-
-        // Register the user with the CA
-        const secret = await ca.register({
-            affiliation: 'org1.department1',
-            enrollmentID: 'districtPoliceA',
-            role: 'client',
-            attrs: [
-                { name: 'role', value: 'investigator', ecert: true },
-                { name: 'organization', value: 'DistrictPoliceA', ecert: true }
-            ]
-        }, adminUser);
-
-        console.log('Successfully registered user "districtPoliceA" with CA');
-
-        // Enroll the user
-        const userEnrollment = await ca.enroll({
-            enrollmentID: 'districtPoliceA',
-            enrollmentSecret: secret
-        });
-
-        // Create X.509 identity
-        const userX509Identity = {
-            credentials: {
-                certificate: userEnrollment.certificate,
-                privateKey: userEnrollment.key.toBytes(),
-            },
-            mspId: 'Org1MSP',
-            type: 'X.509',
-        };
-
-        // Import identity into wallet
-        await wallet.put('DistrictPoliceA', userX509Identity);
-        console.log('Successfully enrolled user "DistrictPoliceA" for Org1 and imported it into the wallet');
-        
-        console.log('\n✅ All identities for District Police A (Org1) have been created successfully!');
-
-    } catch (error) {
-        console.error(`Failed to register District Police A: ${error}`);
-        process.exit(1);
-    }
+  return { ca, wallet, ccp };
 }
 
-registerDistrictPoliceA();
+async function registerAdmin() {
+  const { ca, wallet } = await getCAAndWallet();
+
+  const adminExists = await wallet.get('AdminOrg1');
+  if (adminExists) {
+    console.log('✅ AdminOrg1 already exists in wallet');
+    return;
+  }
+
+  const enrollment = await ca.enroll({
+    enrollmentID: 'admin',
+    enrollmentSecret: 'adminpw'
+  });
+
+  const x509Identity = {
+    credentials: {
+      certificate: enrollment.certificate,
+      privateKey: enrollment.key.toBytes(),
+    },
+    mspId: 'Org1MSP',
+    type: 'X.509',
+  };
+
+  await wallet.put('AdminOrg1', x509Identity);
+  console.log('✅ Successfully enrolled AdminOrg1 and imported it into the wallet');
+}
+
+async function registerUser(username, enrollmentID, role, organization) {
+  try {
+    console.log(`\n--- Registering ${username} for Org1 (${organization}) ---`);
+    const { ca, wallet } = await getCAAndWallet();
+
+    const adminIdentity = await wallet.get('AdminOrg1');
+    if (!adminIdentity) throw new Error('❌ AdminOrg1 not found in wallet. Run registerAdmin first.');
+
+    const userExists = await wallet.get(username);
+    if (userExists) {
+      console.log(`ℹ️ Identity "${username}" already exists in wallet`);
+      return;
+    }
+
+    const provider = wallet.getProviderRegistry().getProvider(adminIdentity.type);
+    const adminUser = await provider.getUserContext(adminIdentity, 'AdminOrg1');
+
+    const secret = await ca.register({
+      affiliation: 'org1.department1',
+      enrollmentID,
+      role: 'client',
+      attrs: [
+        { name: 'role', value: role, ecert: true },
+        { name: 'organization', value: organization, ecert: true }
+      ]
+    }, adminUser);
+
+    const enrollment = await ca.enroll({ enrollmentID, enrollmentSecret: secret });
+
+    const identity = {
+      credentials: {
+        certificate: enrollment.certificate,
+        privateKey: enrollment.key.toBytes(),
+      },
+      mspId: 'Org1MSP',
+      type: 'X.509',
+    };
+
+    await wallet.put(username, identity);
+    console.log(`✅ ${username} successfully enrolled and added to wallet`);
+  } catch (err) {
+    console.error(`❌ Failed to register ${username}:`, err);
+    throw err;
+  }
+}
+
+// CLI usage
+(async () => {
+  const args = process.argv.slice(2);
+  if (args[0] === 'admin') {
+    await registerAdmin();
+  } else if (args.length === 3) {
+    const [username, role, organization] = args;
+    const enrollmentID = username.toLowerCase(); // could also be email if preferred
+    await registerUser(username, enrollmentID, role, organization);
+  } else {
+    console.log(`
+Usage:
+  node registerDistrictPoliceA.js admin
+  node registerDistrictPoliceA.js <username> <role> <organization>
+
+Examples:
+  node registerDistrictPoliceA.js ForensicsOfficerA forensics_officer DistrictPoliceA
+  node registerDistrictPoliceA.js InvestigatorA investigator DistrictPoliceA
+`);
+  }
+})();

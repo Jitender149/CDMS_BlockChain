@@ -6,6 +6,8 @@ import DashboardPage from "../pages/DashboardPage";
 import AccessManagementPage from "../pages/AccessManagementPage";
 import AuditPage from "../pages/AuditPage";
 import LoginPage from "../pages/LoginPage";
+import RegisterPage from "../pages/RegisterPage";
+import AdminApprove from "../pages/AdminApprove";
 import RecordsPage from "../pages/RecordsPage";
 import UploadPage from "../pages/UploadPage";
 
@@ -40,6 +42,20 @@ export const ROUTES = [
     label: "Login",
     roles: [],
     showInSidebar: false, // Do not show in Sidebar
+  },
+  {
+    path: "/register",
+    element: RegisterPage,
+    label: "Sign Up",
+    roles: [],
+    showInSidebar: false,
+  },
+  {
+    path: "/admin-approve",
+    element: AdminApprove,
+    label: "Admin Approve",
+    roles: ["Admin"],
+    showInSidebar: false,
   },
   {
     path: "/records",
