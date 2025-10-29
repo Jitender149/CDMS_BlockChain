@@ -7,6 +7,7 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
+const CDMSStorage = require('./storage');
 
 class CDMSBackend {
     constructor(config = {}) {
@@ -281,7 +282,7 @@ class CDMSBackend {
     }
 
     /**
-     * Store encrypted file on disk (later: MinIO)
+     * Store encrypted file using storage system
      */
     async storeEncryptedFile(recordId, encryptedData, iv, authTag) {
         const metadata = {
@@ -302,20 +303,10 @@ class CDMSBackend {
     }
 
     /**
-     * Retrieve encrypted file from disk
+     * Retrieve encrypted file using storage system
      */
     async retrieveEncryptedFile(recordId) {
-        const filePath = path.join(this.filesPath, `${recordId}.enc`);
-        const metaPath = path.join(this.filesPath, `${recordId}.meta.json`);
-        
-        const encryptedData = await fs.readFile(filePath);
-        const metadata = JSON.parse(await fs.readFile(metaPath, 'utf8'));
-        
-        return {
-            encryptedData,
-            iv: Buffer.from(metadata.iv, 'base64'),
-            authTag: Buffer.from(metadata.authTag, 'base64')
-        };
+        return await this.storage.retrieveEncryptedFile(recordId);
     }
 
     // ============================================
