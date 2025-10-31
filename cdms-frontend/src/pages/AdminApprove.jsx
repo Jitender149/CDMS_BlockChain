@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
+const API_URL = import.meta.env.VITE_APP_API_URL;
+
 export default function AdminApprove() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
@@ -11,7 +13,7 @@ export default function AdminApprove() {
     setLoading(true);
     setMessage('');
     try {
-      const res = await axios.post('http://localhost:3000/approve-registration', { email });
+      const res = await axios.post(`${API_URL}/approve-registration`, { email });
       setMessage(res.data.message || 'User approved!');
     } catch (err) {
       setMessage(err.response?.data?.error || 'Approval failed');
