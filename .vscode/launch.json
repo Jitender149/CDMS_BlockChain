@@ -1,0 +1,75 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "CDMS Backend (Windows)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/cdms-backend/api.js",
+      "cwd": "${workspaceFolder}/cdms-backend",
+      "envFile": "${workspaceFolder}/cdms-backend/.env",
+      "console": "integratedTerminal",
+      "restart": true,
+      "runtimeExecutable": "node",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "CDMS Backend (WSL)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/cdms-backend/api.js",
+      "cwd": "${workspaceFolder}/cdms-backend",
+      "envFile": "${workspaceFolder}/cdms-backend/.env",
+      "console": "integratedTerminal",
+      "restart": true,
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": [
+        "node"
+      ],
+      "useWSL": true,
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "CDMS Backend - Dev (WSL)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/cdms-backend/api.js",
+      "cwd": "${workspaceFolder}/cdms-backend",
+      "envFile": "${workspaceFolder}/cdms-backend/.env",
+      "console": "integratedTerminal",
+      "restart": true,
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": [
+        "npm",
+        "run",
+        "dev"
+      ],
+      "useWSL": true,
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "Test Vault (WSL)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/cdms-backend/testVault.js",
+      "cwd": "${workspaceFolder}/cdms-backend",
+      "envFile": "${workspaceFolder}/cdms-backend/.env",
+      "console": "integratedTerminal",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": [
+        "node"
+      ],
+      "useWSL": true,
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}
+

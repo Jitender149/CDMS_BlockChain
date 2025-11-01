@@ -26,6 +26,12 @@ class CDMSBackend {
             throw new Error('Vault token is required. Set VAULT_TOKEN environment variable or pass vaultToken in config');
         }
         
+        // Initialize storage
+        this.storage = new CDMSStorage({
+            useMinio: config.useMinio || false,
+            localPath: this.filesPath
+        });
+        
         // Ensure files directory exists
         this._ensureFilesDir();
     }
@@ -338,24 +344,57 @@ async getContract(userId, org) {
         `../fabric-samples/test-network/organizations/peerOrganizations/${orgName}/connection-${orgLabel.toLowerCase()}.json`
     );
 
-
-    const ccp = JSON.parse(await fs.readFile(ccpPath, 'utf8'));
-    const wallet = await Wallets.newFileSystemWallet(this.walletPath);
-
-    const identity = await wallet.get(userId);
-    if (!identity) {
-        throw new Error(`Identity "${userId}" does not exist in wallet for ${orgLabel}`);
+    // Check if connection profile exists
+    try {
+        await fs.access(ccpPath);
+        console.log(`[BACKEND DEBUG] Connection profile found: ${ccpPath}`);
+    } catch (error) {
+        throw new Error(
+            `Fabric network not set up. Connection profile not found at: ${ccpPath}\n` +
+            `Please set up the Fabric test network first:\n` +
+            `1. Navigate to: cd fabric-samples/test-network\n` +
+            `2. Start the network: ./network.sh up createChannel\n` +
+            `3. Deploy your chaincode to the channel\n` +
+            `The connection profiles will be generated when the network starts.`
+        );
     }
 
+    console.log(`[BACKEND DEBUG] Loading connection profile...`);
+    const ccp = JSON.parse(await fs.readFile(ccpPath, 'utf8'));
+    console.log(`[BACKEND DEBUG] Connection profile loaded. Channel: ${Object.keys(ccp.channels || {})[0] || 'Not found'}`);
+
+    console.log(`[BACKEND DEBUG] Opening wallet at: ${this.walletPath}`);
+    const wallet = await Wallets.newFileSystemWallet(this.walletPath);
+
+    console.log(`[BACKEND DEBUG] Looking for identity: ${userId} in wallet...`);
+    const identity = await wallet.get(userId);
+    if (!identity) {
+        const allIdentities = await wallet.list();
+        console.log(`[BACKEND DEBUG] Available identities in wallet: ${JSON.stringify(allIdentities)}`);
+        throw new Error(`Identity "${userId}" does not exist in wallet for ${orgLabel}. Available identities: ${JSON.stringify(allIdentities || [])}`);
+    }
+    console.log(`[BACKEND DEBUG] Identity found: ${userId}`);
+
+    console.log(`[BACKEND DEBUG] Creating Gateway and connecting...`);
     const gateway = new Gateway();
     await gateway.connect(ccp, {
         wallet,
         identity: userId,
-        discovery: { enabled: true, asLocalhost: true }
+        discovery: { enabled: false, asLocalhost: true },
+        eventHandlerOptions: {
+            commitTimeout: 300,
+            strategy: null
+        }
     });
+    console.log(`[BACKEND DEBUG] Gateway connected successfully`);
 
+    console.log(`[BACKEND DEBUG] Getting network: ${this.channelName}...`);
     const network = await gateway.getNetwork(this.channelName);
+    console.log(`[BACKEND DEBUG] Network obtained: ${this.channelName}`);
+
+    console.log(`[BACKEND DEBUG] Getting contract: ${this.contractName}...`);
     const contract = network.getContract(this.contractName);
+    console.log(`[BACKEND DEBUG] Contract obtained: ${this.contractName}`);
 
     console.log(`✅ Connected to Fabric network as ${userId} from ${orgLabel}`);
 

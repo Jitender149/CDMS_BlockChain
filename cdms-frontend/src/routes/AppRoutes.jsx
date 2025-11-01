@@ -19,7 +19,7 @@ export default function AppRoutes() {
           user ? (
             <Navigate to="/dashboard" replace />
           ) : (
-            <LoginPage onLogin={login} />
+            <LoginPage />
           )
         }
       />

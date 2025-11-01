@@ -12,9 +12,9 @@ export const RECORD_CATEGORIES = {
 };
 
 export const USER_ROLES = {
-  ADMIN: 'Admin',
-  INVESTIGATOR: 'Investigator',
-  FORENSICS_OFFICER: 'Forensics Officer',
+  ADMIN: 'admin',
+  INVESTIGATOR: 'investigator',
+  FORENSICS_OFFICER: 'forensics_officer',
   OBSERVER: 'Observer'
 };
 

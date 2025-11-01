@@ -1,8 +1,16 @@
-{
+[
+  {
     "email": "example@gmail.com",
     "password": "$2b$10$UbJAol.AdNQ40qNo2W0sceW5fo0pVXZQ5MO819mcOfFROtHZ99kny",
     "role": "admin",
-    "username" : "adminA",
+    "username": "adminA",
     "org": "A"
-
-}
+  },
+  {
+    "email": "admin@cdms.local",
+    "username": "adminA",
+    "password": "$2b$10$cIdFVj8RAF5ZE2ci1rZuh.PLM6Kn1Qk4j.CIrdtXnPceewGB49.Ui",
+    "role": "admin",
+    "org": "A"
+  }
+]

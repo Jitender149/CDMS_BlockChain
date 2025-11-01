@@ -17,10 +17,21 @@ const LoginPage = () => {
     }
 
     try {
-      await login({ email, password, org }); // org now included
       setError("");
+      await login({ email, password, org }); // org now included
+      // Navigation happens in useAuth hook after successful login
     } catch (err) {
-      setError(err.response?.data?.error || "Invalid credentials");
+      // Handle both fetch API errors and custom errors
+      // Show more detailed error messages
+      let errorMessage = err.message || err.error || "Invalid credentials";
+      
+      // Add helpful context for Fabric network errors
+      if (err.status === 503 && err.details) {
+        errorMessage = `${errorMessage}. ${err.details}`;
+      }
+      
+      setError(errorMessage);
+      console.error('Login failed:', err);
     }
   };
 
@@ -101,9 +112,24 @@ const LoginPage = () => {
               */}
 
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-                  <AlertTriangle className="w-5 h-5 mr-2" />
-                  {error}
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                  <div className="flex items-center mb-2">
+                    <AlertTriangle className="w-5 h-5 mr-2 flex-shrink-0" />
+                    <span className="font-semibold">Login Failed</span>
+                  </div>
+                  <div className="text-sm mt-2 whitespace-pre-line">
+                    {error}
+                  </div>
+                  {error.includes('Fabric network not set up') && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-sm">
+                      <strong>Quick Fix:</strong> Open WSL terminal and run:
+                      <code className="block mt-2 p-2 bg-yellow-100 rounded font-mono text-xs">
+                        cd fabric-samples/test-network<br />
+                        ./network.sh up createChannel
+                      </code>
+                      See <code className="font-mono">QUICK_START_FABRIC.md</code> for detailed instructions.
+                    </div>
+                  )}
                 </div>
               )}
 

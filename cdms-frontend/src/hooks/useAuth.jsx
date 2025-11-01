@@ -2,7 +2,7 @@ import { useState, useContext, createContext } from "react";
 import { useNavigate } from "react-router-dom";
 
 const AuthContext = createContext(null);
-const API_URL = import.meta.env.VITE_APP_API_URL;
+const API_URL = import.meta.env.VITE_APP_API_URL || 'http://localhost:3000';
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -17,12 +17,27 @@ export const AuthProvider = ({ children }) => {
       });
 
       if (!response.ok) {
-        throw new Error("Login failed");
+        // Parse error response to get error message
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (parseError) {
+          errorData = { error: 'Login failed', message: `Server returned ${response.status} ${response.statusText}` };
+        }
+        
+        const error = new Error(errorData.message || errorData.error || 'Login failed');
+        error.status = response.status;
+        error.details = errorData.details;
+        throw error;
       }
 
-      const user = await response.json();
-      setUser(user);
-      return user;
+      const data = await response.json();
+      // Handle both user object directly or nested in response
+      const userData = data.user || data;
+      setUser(userData);
+      // Navigate to dashboard on successful login
+      navigate("/dashboard");
+      return userData;
     } catch (error) {
       console.error("Login error:", error);
       throw error;

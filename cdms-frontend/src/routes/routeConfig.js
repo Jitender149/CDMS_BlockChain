@@ -1,6 +1,6 @@
 // src/routes/routeConfig.js
 
-import { Activity, FileText, Upload, Database, Users } from "lucide-react";
+import { Activity, FileText, Upload, Database, Users, Blocks } from "lucide-react";
 
 import DashboardPage from "../pages/DashboardPage";
 import AccessManagementPage from "../pages/AccessManagementPage";
@@ -10,6 +10,7 @@ import RegisterPage from "../pages/RegisterPage";
 import AdminApprove from "../pages/AdminApprove";
 import RecordsPage from "../pages/RecordsPage";
 import UploadPage from "../pages/UploadPage";
+import BlockHistoryPage from "../pages/BlockHistoryPage";
 
 export const ROUTES = [
   {
@@ -17,7 +18,7 @@ export const ROUTES = [
     element: DashboardPage,
     label: "Dashboard",
     icon: Activity,
-    roles: ["Admin", "Forensics", "Investigator"],
+    roles: ["admin", "forensics_officer", "investigator"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -25,7 +26,7 @@ export const ROUTES = [
     element: AccessManagementPage,
     label: "Access Management",
     icon: Users,
-    roles: ["Admin"],
+    roles: ["admin"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -33,7 +34,7 @@ export const ROUTES = [
     element: AuditPage,
     label: "Audit Trail",
     icon: Database,
-    roles: ["Admin", "Forensics"],
+    roles: ["admin", "forensics_officer"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -54,7 +55,7 @@ export const ROUTES = [
     path: "/admin-approve",
     element: AdminApprove,
     label: "Admin Approve",
-    roles: ["Admin"],
+    roles: ["admin"],
     showInSidebar: false,
   },
   {
@@ -62,7 +63,7 @@ export const ROUTES = [
     element: RecordsPage,
     label: "Records",
     icon: FileText,
-    roles: ["Admin", "Forensics", "Investigator"],
+    roles: ["admin", "forensics_officer", "investigator"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -70,7 +71,15 @@ export const ROUTES = [
     element: UploadPage,
     label: "Upload",
     icon: Upload,
-    roles: ["Admin", "Forensics"],
+    roles: ["admin", "forensics_officer"],
+    showInSidebar: true, // Show in Sidebar
+  },
+  {
+    path: "/block-history",
+    element: BlockHistoryPage,
+    label: "Block History",
+    icon: Blocks,
+    roles: ["admin", "forensics_officer", "investigator"],
     showInSidebar: true, // Show in Sidebar
   },
 ];

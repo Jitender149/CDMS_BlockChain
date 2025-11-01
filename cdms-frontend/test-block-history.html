@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Block History Auth Test</title>
+</head>
+<body>
+    <h1>Block History Auth Test</h1>
+    <div id="result"></div>
+    <script>
+        // Test walletId calculation logic
+        const authUser = {
+            email: 'example@gmail.com',
+            role: 'admin',
+            org: 'A'
+        };
+        
+        const userRole = (authUser.role || '').toLowerCase();
+        const userOrg = authUser.org || "A";
+        
+        let userId;
+        if (authUser.walletId) {
+            userId = authUser.walletId;
+        } else if (userRole === 'admin') {
+            userId = userOrg === 'A' ? 'AdminOrg1' : 'AdminOrg2';
+        } else if (authUser.email) {
+            userId = authUser.email.toLowerCase().replace(/[@.]/g, '_');
+        }
+        
+        document.getElementById('result').innerHTML = `
+            <p><strong>Input:</strong></p>
+            <pre>${JSON.stringify(authUser, null, 2)}</pre>
+            <p><strong>Calculated walletId:</strong> <code>${userId}</code></p>
+            <p><strong>Expected:</strong> <code>AdminOrg1</code></p>
+            <p><strong>Match:</strong> ${userId === 'AdminOrg1' ? '✅ YES' : '❌ NO'}</p>
+        `;
+    </script>
+</body>
+</html>
+

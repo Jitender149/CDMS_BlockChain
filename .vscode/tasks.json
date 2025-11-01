@@ -1,0 +1,66 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm install (WSL)",
+      "type": "shell",
+      "command": "wsl",
+      "args": [
+        "cd",
+        "${workspaceFolder}/cdms-backend",
+        "&&",
+        "npm",
+        "install"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/cdms-backend"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Vault Server (WSL)",
+      "type": "shell",
+      "command": "wsl",
+      "args": [
+        "vault",
+        "server",
+        "-dev",
+        "-dev-root-token-id=root"
+      ],
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "npm start (WSL)",
+      "type": "shell",
+      "command": "wsl",
+      "args": [
+        "cd",
+        "${workspaceFolder}/cdms-backend",
+        "&&",
+        "npm",
+        "start"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/cdms-backend"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
+
