@@ -1,0 +1,8 @@
+{
+    "email": "example@gmail.com",
+    "password": "$2b$10$UbJAol.AdNQ40qNo2W0sceW5fo0pVXZQ5MO819mcOfFROtHZ99kny",
+    "role": "admin",
+    "username" : "adminA",
+    "org": "A"
+
+}
