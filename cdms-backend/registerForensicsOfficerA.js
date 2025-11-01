@@ -4,55 +4,105 @@ const { Wallets } = require('fabric-network');
 const fs = require('fs');
 const path = require('path');
 
-async function registerForensicsOfficerA() {
+/**
+ * Registers and enrolls a new Forensics Officer for Org1 (DistrictPoliceA)
+ * @param {string} email - Unique email of the forensics officer (used as enrollmentID)
+ */
+async function registerForensicsOfficerA(email) {
   try {
-    console.log('\n--- Registering Forensics Officer for Org1 (DistrictPoliceA) ---');
+    console.log(`\n--- Registering Forensics Officer for Org1 (DistrictPoliceA): ${email} ---`);
 
-    const ccpPath = path.resolve(__dirname, '..', 'fabric-samples', 'test-network',
-      'organizations', 'peerOrganizations', 'org1.example.com', 'connection-org1.json');
+    // ✅ Load connection profile for Org1
+    const ccpPath = path.resolve(
+      __dirname,
+      '..',
+      'fabric-samples',
+      'test-network',
+      'organizations',
+      'peerOrganizations',
+      'org1.example.com',
+      'connection-org1.json'
+    );
     const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
 
+    // ✅ Create CA client for Org1
     const caInfo = ccp.certificateAuthorities['ca.org1.example.com'];
     const caTLSCACerts = caInfo.tlsCACerts.pem;
-    const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
+    const ca = new FabricCAServices(
+      caInfo.url,
+      { trustedRoots: caTLSCACerts, verify: false },
+      caInfo.caName
+    );
 
+    // ✅ Create wallet
     const walletPath = path.join(__dirname, 'wallet');
     const wallet = await Wallets.newFileSystemWallet(walletPath);
+    console.log(`Wallet path: ${walletPath}`);
 
-    const userIdentity = await wallet.get('ForensicsOfficerA');
+    // ✅ Check if the identity already exists
+    const userIdentity = await wallet.get(email);
     if (userIdentity) {
-      console.log('Identity "ForensicsOfficerA" already exists in wallet');
+      console.log(`⚠️ Identity for ${email} already exists in the wallet`);
       return;
     }
 
+    // ✅ Get admin identity for Org1
     const adminIdentity = await wallet.get('AdminOrg1');
-    if (!adminIdentity) throw new Error('AdminOrg1 not found in wallet');
+    if (!adminIdentity) {
+      throw new Error('❌ AdminOrg1 not found in wallet. Please enroll admin first.');
+    }
+
     const provider = wallet.getProviderRegistry().getProvider(adminIdentity.type);
     const adminUser = await provider.getUserContext(adminIdentity, 'AdminOrg1');
 
-    const secret = await ca.register({
-      affiliation: 'org1.department1',
-      enrollmentID: 'forensicsA',
-      role: 'client',
-      attrs: [
-        { name: 'role', value: 'forensics_officer', ecert: true },
-        { name: 'organization', value: 'DistrictPoliceA', ecert: true }
-      ]
-    }, adminUser);
+    // ✅ Register the new forensics officer
+    const secret = await ca.register(
+      {
+        affiliation: 'org1.department1',
+        enrollmentID: email,
+        role: 'client',
+        attrs: [
+          { name: 'role', value: 'forensics_officer', ecert: true },
+          { name: 'organization', value: 'DistrictPoliceA', ecert: true },
+          { name: 'email', value: email, ecert: true },
+        ],
+      },
+      adminUser
+    );
 
-    const enrollment = await ca.enroll({ enrollmentID: 'forensicsA', enrollmentSecret: secret });
+    // ✅ Enroll the new forensics officer
+    const enrollment = await ca.enroll({
+      enrollmentID: email,
+      enrollmentSecret: secret,
+    });
+
+    // ✅ Create and store identity
     const identity = {
-      credentials: { certificate: enrollment.certificate, privateKey: enrollment.key.toBytes() },
+      credentials: {
+        certificate: enrollment.certificate,
+        privateKey: enrollment.key.toBytes(),
+      },
       mspId: 'Org1MSP',
       type: 'X.509',
     };
-    await wallet.put('ForensicsOfficerA', identity);
 
-    console.log('✅ ForensicsOfficerA enrolled and added to wallet');
+    await wallet.put(email, identity);
+    console.log(`✅ Successfully registered and enrolled Forensics Officer (${email}) for Org1`);
   } catch (error) {
     console.error(`❌ Failed to register ForensicsOfficerA: ${error}`);
     throw error;
   }
+}
+
+// Run via command line for testing
+// Example: node registerForensicsOfficerA.js forensicsA@example.com
+if (require.main === module) {
+  const email = process.argv[2];
+  if (!email) {
+    console.error('❌ Please provide an email. Usage: node registerForensicsOfficerA.js forensicsA@example.com');
+    process.exit(1);
+  }
+  registerForensicsOfficerA(email);
 }
 
 module.exports = registerForensicsOfficerA;
