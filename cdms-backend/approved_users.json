@@ -1,16 +1,44 @@
 [
   {
+    "username": "admin",
     "email": "example@gmail.com",
-    "password": "$2b$10$UbJAol.AdNQ40qNo2W0sceW5fo0pVXZQ5MO819mcOfFROtHZ99kny",
+    "password": "$2b$10$fuEzhNnsHrzO2R1IIcvUte4JkZ9SLltJ0aEU5NpwimcA7hp77thRy",
+    "org": "A",
     "role": "admin",
-    "username": "adminA",
-    "org": "A"
+    "walletId": "AdminOrg1"
   },
   {
-    "email": "admin@cdms.local",
-    "username": "adminA",
-    "password": "$2b$10$cIdFVj8RAF5ZE2ci1rZuh.PLM6Kn1Qk4j.CIrdtXnPceewGB49.Ui",
-    "role": "admin",
-    "org": "A"
+    "username": "TestUser",
+    "email": "testuser1521505254@example.com",
+    "password": "$2b$10$p3dzZ1uoNGT/mMX0EuURuO5FwLkKsWhoR2QDTQxGLQvWa/7kWQBSy",
+    "role": "investigator",
+    "org": "A",
+    "walletId": "TestUser"
+  },
+  {
+    "username": "kudimainukehdijaguarlelo",
+    "email": "kudimainukehdijaguarlelo@gmail.com",
+    "password": "$2b$10$Qdbkz/39siPvOCx/94HG0uiDX5QwoI6RvC3kqMB8E5PBD0S3M7fnm",
+    "role": "district_police",
+    "org": "A",
+    "walletId": "kudimainukehdijaguarlelo"
+  },
+  {
+    "username": "samebeef",
+    "email": "samebeef@gmail.com",
+    "password": "$2b$10$WbS7WkKycRnq7uOzSCyWfufu3EDpUXzqbhthwKx6j9Vc3X/fVO95a",
+    "role": "investigator",
+    "org": "A",
+    "status": "pending",
+    "walletId": "samebeef"
+  },
+  {
+    "username": "balleballe",
+    "email": "balleballe@gmail.com",
+    "password": "$2b$10$gbREtSGFxm9UdOyomnqPr.UwkqrQ/8bFadH92xRMj0K3mhGvzig5y",
+    "role": "forensics_officer",
+    "org": "A",
+    "status": "pending",
+    "walletId": "balleballe"
   }
 ]

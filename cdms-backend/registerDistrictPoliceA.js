@@ -113,3 +113,8 @@ Examples:
 `);
   }
 })();
+
+// Export for use in api.js
+module.exports = async function(username, email) {
+  return registerUser(username, email, 'admin', 'Org1MSP');
+};

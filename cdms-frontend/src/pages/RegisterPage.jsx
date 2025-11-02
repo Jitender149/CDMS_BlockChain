@@ -12,7 +12,8 @@ import {
   ArrowLeft,
 } from "lucide-react";
 
-
+// API URL configuration
+const API_URL = import.meta.env.VITE_APP_API_URL || 'http://localhost:3000';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
@@ -34,12 +35,17 @@ const RegisterPage = () => {
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState("");
 
-  const roles = ["Admin", "Investigator", "Forensics Officer"];
+  // Available roles for registration
+  const roles = [
+    { value: "district_police", label: "District Police" },
+    { value: "investigator", label: "Investigator" },
+    { value: "forensics_officer", label: "Forensics Officer" },
+  ];
 
+  // Organizations
   const organizations = [
-    "District Police A",
-    "District Police B",
-    "District Police C",
+    { value: "A", label: "District Police A" },
+    { value: "B", label: "District Police B" },
   ];
 
   const validateForm = () => {
@@ -337,8 +343,8 @@ const RegisterPage = () => {
                   >
                     <option value="">Select your role</option>
                     {roles.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
+                      <option key={role.value} value={role.value}>
+                        {role.label}
                       </option>
                     ))}
                   </select>
@@ -363,8 +369,8 @@ const RegisterPage = () => {
                   >
                     <option value="">Select organization</option>
                     {organizations.map((org) => (
-                      <option key={org} value={org}>
-                        {org}
+                      <option key={org.value} value={org.value}>
+                        {org.label}
                       </option>
                     ))}
                   </select>

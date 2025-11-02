@@ -16,7 +16,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHAINCODE_NAME="cdmscontract"
 CHAINCODE_LANGUAGE="javascript"
 CHANNEL_NAME="mychannel"
-CC_VERSION="1.2"  # Incremented for block history fix
+CC_VERSION="1.4"  # Updated role permissions: district_police, investigator, forensics_officer, admin
 
 # Colors for output
 GREEN='\033[0;32m'

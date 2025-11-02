@@ -125,6 +125,16 @@ app.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'User not registered or approved yet' });
         }
 
+        // Check if user access is revoked
+        if (foundUser.status === 'revoked') {
+            return res.status(403).json({ 
+                error: 'Access revoked', 
+                message: 'Your access has been revoked by an administrator. Please contact support.',
+                revoked_at: foundUser.revoked_at,
+                revoke_reason: foundUser.revoke_reason
+            });
+        }
+
         // Verify password
         const match = await bcrypt.compare(password, foundUser.password);
         if (!match) {
@@ -133,9 +143,10 @@ app.post('/login', async (req, res) => {
 
         // Verify user exists in Fabric wallet (wrap in try-catch for better error messages)
         const userOrg = foundUser.org === 'A' ? 'Org1' : 'Org2';
-        const walletId = foundUser.role === 'admin'
+        // Use walletId from approved_users.json if available, otherwise fallback to admin logic
+        const walletId = foundUser.walletId || (foundUser.role === 'admin'
             ? (foundUser.org === 'A' ? 'AdminOrg1' : 'AdminOrg2')
-            : foundUser.email.toLowerCase().replace(/[@.]/g, '_');
+            : foundUser.username);
 
         console.log(`[LOGIN DEBUG] Attempting login for: ${foundUser.email}`);
         console.log(`[LOGIN DEBUG] Organization: ${userOrg}, Wallet ID: ${walletId}, Role: ${foundUser.role}`);
@@ -201,36 +212,75 @@ app.post('/login', async (req, res) => {
 });
 
 // =========================================================
+// Get Pending Registrations (Admin Only)
+// =========================================================
+app.get('/pending-registrations', async (req, res) => {
+    try {
+        const { adminEmail } = req.query;
+        
+        // Verify admin
+        const approved = loadJSON(APPROVED_PATH);
+        const admin = approved.get(adminEmail);
+        
+        if (!admin || admin.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        
+        const pending = loadJSON(PENDING_REG_PATH);
+        const pendingList = Array.from(pending.values());
+        
+        return res.json({
+            success: true,
+            count: pendingList.length,
+            pending: pendingList
+        });
+    } catch (err) {
+        console.error('Get pending registrations error:', err);
+        return res.status(500).json({ error: 'Failed to retrieve pending registrations', message: err.message });
+    }
+});
+
+// =========================================================
 // Approve Registration (Admin)
 // =========================================================
 app.post('/approve-registration', async (req, res) => {
     try {
-        const { email } = req.body;
+        const { email, adminEmail } = req.body;
         if (!email) return res.status(400).json({ error: 'Email required' });
+        if (!adminEmail) return res.status(400).json({ error: 'Admin email required' });
+
+        // Verify admin
+        const approvedUsers = loadJSON(APPROVED_PATH);
+        const admin = approvedUsers.get(adminEmail);
+        
+        if (!admin || admin.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
 
         const pending = loadJSON(PENDING_REG_PATH);
         const user = pending.get(email);
         if (!user) return res.status(404).json({ error: 'No pending registration for this email' });
 
-        console.log(`Approving user ${user.username} (${user.role}) for ${user.org}...`);
+        console.log(`Admin ${adminEmail} approving user ${user.username} (${user.role}) for ${user.org}...`);
 
         // Register based on org and role
+        // Roles: district_police, forensics_officer, investigator, admin
         if (user.org === 'A') {
-            if (user.role === 'forensics_officer') {
+            if (user.role === 'forensics_officer' || user.role === 'forensicsOfficerA') {
                 await registerForensicsOfficerA(user.username, user.email);
-            } else if (user.role === 'investigator') {
+            } else if (user.role === 'investigator' || user.role === 'investigatorA') {
                 await registerInvestigatorA(user.username, user.email);
-            } else if (user.role === 'admin' || user.role === 'district_police') {
+            } else if (user.role === 'admin' || user.role === 'district_police' || user.role === 'districtPoliceA') {
                 await registerDistrictPoliceA(user.username, user.email);
             } else {
                 throw new Error(`Unknown role: ${user.role}`);
             }
         } else if (user.org === 'B') {
-            if (user.role === 'forensics_officer') {
+            if (user.role === 'forensics_officer' || user.role === 'forensicsOfficerB') {
                 await registerForensicsOfficerB(user.username, user.email);
-            } else if (user.role === 'investigator') {
+            } else if (user.role === 'investigator' || user.role === 'investigatorB') {
                 await registerInvestigatorB(user.username, user.email);
-            } else if (user.role === 'admin' || user.role === 'district_police') {
+            } else if (user.role === 'admin' || user.role === 'district_police' || user.role === 'districtPoliceB') {
                 await registerDistrictPoliceB(user.username, user.email);
             } else {
                 throw new Error(`Unknown role: ${user.role}`);
@@ -239,24 +289,203 @@ app.post('/approve-registration', async (req, res) => {
             throw new Error(`Unknown organization: ${user.org}`);
         }
 
-        const approved = loadJSON(APPROVED_PATH);
-        approved.set(email, {
+        const approvedFinal = loadJSON(APPROVED_PATH);
+        // Use username as walletId since that's what the registration functions create
+        const walletId = user.username;
+        approvedFinal.set(email, {
             ...user,
-            walletId: user.email.toLowerCase().replace(/[@.]/g, '_'),
+            walletId: walletId,
         });
 
         pending.delete(email);
-        saveJSON(APPROVED_PATH, approved);
+        saveJSON(APPROVED_PATH, approvedFinal);
         saveJSON(PENDING_REG_PATH, pending);
 
         return res.json({
             success: true,
             message: `User ${user.username} approved and enrolled in Fabric (${user.org}). Use your email and password to log in.`,
-            walletId: user.email.toLowerCase().replace(/[@.]/g, '_')
+            walletId: walletId
         });
     } catch (err) {
         console.error('Approval error:', err);
         return res.status(500).json({ error: 'Failed to approve user', message: err.message });
+    }
+});
+
+// =========================================================
+// Reject Registration (Admin)
+// =========================================================
+app.post('/reject-registration', async (req, res) => {
+    try {
+        const { email, adminEmail, reason } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email required' });
+        if (!adminEmail) return res.status(400).json({ error: 'Admin email required' });
+
+        // Verify admin
+        const approvedUsers = loadJSON(APPROVED_PATH);
+        const admin = approvedUsers.get(adminEmail);
+        
+        if (!admin || admin.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+
+        const pending = loadJSON(PENDING_REG_PATH);
+        const user = pending.get(email);
+        if (!user) return res.status(404).json({ error: 'No pending registration for this email' });
+
+        console.log(`Admin ${adminEmail} rejecting user ${user.username} (${user.role}) for ${user.org}. Reason: ${reason || 'Not specified'}`);
+
+        // Remove from pending
+        pending.delete(email);
+        saveJSON(PENDING_REG_PATH, pending);
+
+        return res.json({
+            success: true,
+            message: `User ${user.username} registration rejected.`,
+            reason: reason || 'Not specified'
+        });
+    } catch (err) {
+        console.error('Rejection error:', err);
+        return res.status(500).json({ error: 'Failed to reject user', message: err.message });
+    }
+});
+
+// =========================================================
+// Revoke User Access (Admin)
+// =========================================================
+app.post('/revoke-access', async (req, res) => {
+    try {
+        const { email, adminEmail, reason } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email required' });
+        if (!adminEmail) return res.status(400).json({ error: 'Admin email required' });
+
+        // Verify admin
+        const approved = loadJSON(APPROVED_PATH);
+        const admin = approved.get(adminEmail);
+        
+        if (!admin || admin.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+
+        const user = approved.get(email);
+        if (!user) return res.status(404).json({ error: 'User not found in approved users' });
+
+        // Prevent admin from revoking themselves
+        if (email === adminEmail) {
+            return res.status(400).json({ error: 'Cannot revoke your own access' });
+        }
+
+        console.log(`Admin ${adminEmail} revoking access for ${user.username} (${user.role}). Reason: ${reason || 'Not specified'}`);
+
+        // Mark as revoked instead of deleting (for audit trail)
+        user.status = 'revoked';
+        user.revoked_at = new Date().toISOString();
+        user.revoked_by = adminEmail;
+        user.revoke_reason = reason || 'Not specified';
+
+        approved.set(email, user);
+        saveJSON(APPROVED_PATH, approved);
+
+        return res.json({
+            success: true,
+            message: `Access revoked for user ${user.username}.`,
+            user: {
+                email: user.email,
+                username: user.username,
+                status: 'revoked'
+            }
+        });
+    } catch (err) {
+        console.error('Revoke access error:', err);
+        return res.status(500).json({ error: 'Failed to revoke access', message: err.message });
+    }
+});
+
+// =========================================================
+// Restore User Access (Admin)
+// =========================================================
+app.post('/restore-access', async (req, res) => {
+    try {
+        const { email, adminEmail } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email required' });
+        if (!adminEmail) return res.status(400).json({ error: 'Admin email required' });
+
+        // Verify admin
+        const approved = loadJSON(APPROVED_PATH);
+        const admin = approved.get(adminEmail);
+        
+        if (!admin || admin.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+
+        const user = approved.get(email);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.status !== 'revoked') {
+            return res.status(400).json({ error: 'User access is not revoked' });
+        }
+
+        console.log(`Admin ${adminEmail} restoring access for ${user.username} (${user.role})`);
+
+        // Restore access
+        delete user.status; // Remove revoked status
+        delete user.revoked_at;
+        delete user.revoked_by;
+        delete user.revoke_reason;
+
+        approved.set(email, user);
+        saveJSON(APPROVED_PATH, approved);
+
+        return res.json({
+            success: true,
+            message: `Access restored for user ${user.username}.`,
+            user: {
+                email: user.email,
+                username: user.username,
+                status: 'active'
+            }
+        });
+    } catch (err) {
+        console.error('Restore access error:', err);
+        return res.status(500).json({ error: 'Failed to restore access', message: err.message });
+    }
+});
+
+// =========================================================
+// Get All Approved Users (Admin)
+// =========================================================
+app.get('/approved-users', async (req, res) => {
+    try {
+        const { adminEmail } = req.query;
+        
+        // Verify admin
+        const approved = loadJSON(APPROVED_PATH);
+        const admin = approved.get(adminEmail);
+        
+        if (!admin || admin.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        
+        const usersList = Array.from(approved.values()).map(u => ({
+            email: u.email,
+            username: u.username,
+            role: u.role,
+            org: u.org,
+            status: u.status || 'active',
+            walletId: u.walletId,
+            revoked_at: u.revoked_at,
+            revoked_by: u.revoked_by,
+            revoke_reason: u.revoke_reason
+        }));
+        
+        return res.json({
+            success: true,
+            count: usersList.length,
+            users: usersList
+        });
+    } catch (err) {
+        console.error('Get approved users error:', err);
+        return res.status(500).json({ error: 'Failed to retrieve approved users', message: err.message });
     }
 });
 
