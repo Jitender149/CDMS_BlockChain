@@ -1,0 +1,77 @@
+[
+  {
+    "record_id": "REC_1762106697604_brbxfd",
+    "timestamp": "2025-11-02T18:04:57.604Z",
+    "action": "UPLOAD",
+    "actor": "kudimainukehdijaguarlelo",
+    "details": "File uploaded: clownshiii.jpeg (5437 bytes, hash: c68958320739fff5...)",
+    "value": {
+      "record_id": "REC_1762106697604_brbxfd",
+      "case_id": "CASE-101",
+      "record_type": "FIR",
+      "filename": "clownshiii.jpeg",
+      "file_hash": "c68958320739fff52bcc25db2ed12e13959c2a76f7ddbc348dbd1688de5589d6",
+      "file_size": 5437,
+      "minio_object_name": "CASE-101/1762106697522_c6895832_clownshiii.jpeg",
+      "minio_url": "http://localhost:9000/cdms-evidence/CASE-101/1762106697522_c6895832_clownshiii.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20251102%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20251102T180457Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=1b1b937e131468b17ed63d8b32471561ceda89aeddf4f02d759b22f930c6bc6c",
+      "mime_type": "image/jpeg",
+      "description": "FIR",
+      "uploader_org": "A",
+      "uploader_id": "kudimainukehdijaguarlelo",
+      "uploaded_at": "2025-11-02T18:04:57.604Z",
+      "created_at": "2025-11-02T18:04:57.604Z"
+    },
+    "txId": "LOCAL_1762106697604_fhli1p",
+    "blockchainRecorded": false
+  },
+  {
+    "record_id": "REC_1762109325404_k14c8e",
+    "timestamp": "2025-11-02T18:48:45.404Z",
+    "action": "UPLOAD",
+    "actor": "kudimainukehdijaguarlelo",
+    "details": "File uploaded: clownshiii.jpeg (5437 bytes, hash: c68958320739fff5...)",
+    "value": {
+      "record_id": "REC_1762109325404_k14c8e",
+      "case_id": "CASE-102",
+      "record_type": "Evidence",
+      "filename": "clownshiii.jpeg",
+      "file_hash": "c68958320739fff52bcc25db2ed12e13959c2a76f7ddbc348dbd1688de5589d6",
+      "file_size": 5437,
+      "minio_object_name": "CASE-102/1762109325318_c6895832_clownshiii.jpeg",
+      "minio_url": "http://localhost:9000/cdms-evidence/CASE-102/1762109325318_c6895832_clownshiii.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20251102%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20251102T184845Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=ff29878799e185b34914126cb755b20a334661be26b8e00dc339a93e1cdd42a3",
+      "mime_type": "image/jpeg",
+      "description": "Evidence in image",
+      "uploader_org": "A",
+      "uploader_id": "kudimainukehdijaguarlelo",
+      "uploaded_at": "2025-11-02T18:48:45.404Z",
+      "created_at": "2025-11-02T18:48:45.404Z"
+    },
+    "txId": "LOCAL_1762109325404_1m9nx3",
+    "blockchainRecorded": false
+  },
+  {
+    "record_id": "REC_1762110343655_nrqueq",
+    "timestamp": "2025-11-02T19:05:43.655Z",
+    "action": "UPLOAD",
+    "actor": "kudimainukehdijaguarlelo",
+    "details": "File uploaded: Screenshot 2025-09-13 145149.png (662715 bytes, hash: ffece357593c8619...)",
+    "value": {
+      "record_id": "REC_1762110343655_nrqueq",
+      "case_id": "CASE-103",
+      "record_type": "FIR",
+      "filename": "Screenshot 2025-09-13 145149.png",
+      "file_hash": "ffece357593c8619ffffcd6ac16b2d9c334438b3ca958d9f01c80e6f93aa2821",
+      "file_size": 662715,
+      "minio_object_name": "CASE-103/1762110343545_ffece357_Screenshot_2025-09-13_145149.png",
+      "minio_url": "http://localhost:9000/cdms-evidence/CASE-103/1762110343545_ffece357_Screenshot_2025-09-13_145149.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20251102%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20251102T190543Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=65ad1552619e4d788b09ce09589bef31d232404c8e67ccd0b07367e5fc47ad7a",
+      "mime_type": "image/png",
+      "description": "Balle Balle",
+      "uploader_org": "A",
+      "uploader_id": "kudimainukehdijaguarlelo",
+      "uploaded_at": "2025-11-02T19:05:43.655Z",
+      "created_at": "2025-11-02T19:05:43.655Z"
+    },
+    "txId": "LOCAL_1762110343655_2q3v1r",
+    "blockchainRecorded": false
+  }
+]

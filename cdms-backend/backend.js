@@ -377,16 +377,39 @@ async getContract(userId, org) {
 
     console.log(`[BACKEND DEBUG] Creating Gateway and connecting...`);
     const gateway = new Gateway();
-    await gateway.connect(ccp, {
-        wallet,
-        identity: userId,
-        discovery: { enabled: false, asLocalhost: true },
-        eventHandlerOptions: {
-            commitTimeout: 300,
-            strategy: null
-        }
-    });
-    console.log(`[BACKEND DEBUG] Gateway connected successfully`);
+    
+    // Check if SELF_COMMIT mode is enabled (for local testing)
+    const selfCommitMode = process.env.SELF_COMMIT === 'true';
+    
+    if (selfCommitMode) {
+        console.log(`[BACKEND DEBUG] 🔧 SELF-COMMIT mode enabled (for local testing)`);
+        // Self-commit configuration: immediate block creation and commit
+        await gateway.connect(ccp, {
+            wallet,
+            identity: userId,
+            discovery: { enabled: false, asLocalhost: true },  // Direct peer connection
+            eventHandlerOptions: {
+                commitTimeout: 60,  // Reduced timeout for faster commit
+                strategy: null  // Bypass event wait (rely on immediate orderer block creation)
+            },
+            queryHandlerOptions: {
+                timeout: 30
+            }
+        });
+        console.log(`[BACKEND DEBUG] Gateway connected with SELF-COMMIT configuration`);
+    } else {
+        // Standard configuration
+        await gateway.connect(ccp, {
+            wallet,
+            identity: userId,
+            discovery: { enabled: false, asLocalhost: true },
+            eventHandlerOptions: {
+                commitTimeout: 300,
+                strategy: null
+            }
+        });
+        console.log(`[BACKEND DEBUG] Gateway connected with standard configuration`);
+    }
 
     console.log(`[BACKEND DEBUG] Getting network: ${this.channelName}...`);
     const network = await gateway.getNetwork(this.channelName);

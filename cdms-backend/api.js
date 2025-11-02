@@ -25,6 +25,7 @@ const registerDistrictPoliceB = require('./registerDistrictPoliceB');
 // File paths
 const PENDING_REG_PATH = path.join(__dirname, 'pending_registrations.json');
 const APPROVED_PATH = path.join(__dirname, 'approved_users.json');
+const UPLOADS_FALLBACK_PATH = path.join(__dirname, 'uploads_fallback.json');
 
 // =========================================================
 // Utility Helpers
@@ -54,6 +55,64 @@ function saveJSON(filepath, map) {
 // Ensure files exist
 if (!fs.existsSync(PENDING_REG_PATH)) fs.writeFileSync(PENDING_REG_PATH, '[]');
 if (!fs.existsSync(APPROVED_PATH)) fs.writeFileSync(APPROVED_PATH, '[]');
+if (!fs.existsSync(UPLOADS_FALLBACK_PATH)) fs.writeFileSync(UPLOADS_FALLBACK_PATH, '[]');
+
+// Helper functions for upload fallback storage
+function loadUploadsFallback() {
+    if (!fs.existsSync(UPLOADS_FALLBACK_PATH)) return [];
+    try {
+        return JSON.parse(fs.readFileSync(UPLOADS_FALLBACK_PATH, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+
+function saveUploadFallback(uploadData) {
+    const uploads = loadUploadsFallback();
+    uploads.push(uploadData);
+    fs.writeFileSync(UPLOADS_FALLBACK_PATH, JSON.stringify(uploads, null, 2));
+}
+
+// Helper function to group transactions into blocks for testing
+// In production, blocks are created by the orderer, but for testing we simulate this
+function groupIntoBlocks(transactions, transactionsPerBlock = 5) {
+    if (!transactions || transactions.length === 0) return [];
+    
+    const blocks = [];
+    const sortedTxs = transactions.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    for (let i = 0; i < sortedTxs.length; i += transactionsPerBlock) {
+        const blockTxs = sortedTxs.slice(i, i + transactionsPerBlock);
+        const blockNumber = Math.floor(i / transactionsPerBlock) + 1;
+        const blockTimestamp = blockTxs[blockTxs.length - 1].timestamp; // Use last transaction timestamp
+        
+        // Create a simple block hash (in real blockchain, this would be calculated by orderer)
+        const blockHash = require('crypto')
+            .createHash('sha256')
+            .update(JSON.stringify(blockTxs) + blockNumber + blockTimestamp)
+            .digest('hex');
+        
+        blocks.push({
+            blockNumber,
+            blockHash: `0x${blockHash.substring(0, 64)}`,
+            timestamp: blockTimestamp,
+            transactionCount: blockTxs.length,
+            transactions: blockTxs.map(tx => ({
+                txId: tx.txId,
+                recordId: tx.recordId || tx.value?.record_id,
+                action: tx.action || tx.value?.action || 'UNKNOWN',
+                actor: tx.actor || tx.value?.uploader_id || 'SYSTEM',
+                timestamp: tx.timestamp,
+                value: tx.value || {},
+                source: tx.source || 'fallback',
+                blockchainRecorded: tx.blockchainRecorded !== undefined ? tx.blockchainRecorded : false
+            })),
+            source: 'simulated' // Mark as simulated for testing
+        });
+    }
+    
+    return blocks;
+}
 
 // =========================================================
 // Express Setup
@@ -501,13 +560,45 @@ const upload = multer({
 // Authentication Middleware
 // =========================================================
 function authenticateUser(req, res, next) {
-    const source = req.method === 'GET' ? req.query : req.body;
-    const { userId, org } = source;
+    let userId, org;
+    
+    // Try to get from Authorization header first (for all requests)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+        const parts = token.split(':');
+        if (parts.length === 2) {
+            // Format: Bearer email:org - need to convert email to userId
+            const email = parts[0];
+            org = parts[1];
+            
+            // Look up user in approved_users.json to get walletId
+            const approvedUsers = loadJSON(APPROVED_PATH);
+            const user = approvedUsers.get(email);
+            
+            if (user) {
+                // Use walletId if available, otherwise calculate
+                userId = user.walletId || (user.role === 'admin'
+                    ? (user.org === 'A' ? 'AdminOrg1' : 'AdminOrg2')
+                    : user.username || email);
+            } else {
+                // Fallback: use email as-is (will need to handle in backend)
+                userId = email;
+            }
+        }
+    }
+    
+    // Fallback: try body or query params (for backward compatibility)
+    if (!userId || !org) {
+        const source = req.method === 'GET' ? req.query : req.body;
+        userId = userId || source.userId;
+        org = org || source.org;
+    }
 
     if (!userId || !org) {
         return res.status(401).json({
             error: 'Missing authentication credentials',
-            message: 'userId and org are required'
+            message: 'userId and org are required. Please ensure you are logged in.'
         });
     }
 
@@ -516,25 +607,133 @@ function authenticateUser(req, res, next) {
 }
 
 // =========================================================
-// RECORD MANAGEMENT ENDPOINTS
+// RECORD MANAGEMENT ENDPOINTS WITH MINIO
 // =========================================================
-app.post('/record/upload', authenticateUser, upload.single('file'), async (req, res) => {
+const { uploadFile, generatePresignedUrl, initializeBucket } = require('./minioClient');
+
+// Initialize MinIO on startup
+initializeBucket().catch(err => {
+    console.error('Failed to initialize MinIO:', err.message);
+});
+
+// upload.single parses multipart/form-data, authenticateUser reads from Authorization header
+app.post('/record/upload', upload.single('file'), authenticateUser, async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file provided' });
 
-        const metadata = {
-            case_id: req.body.case_id,
-            record_type: req.body.record_type || 'Evidence',
-            policy_id: req.body.policy_id || 'default-policy',
+        const { case_id, record_type, description } = req.body;
+        if (!case_id) return res.status(400).json({ error: 'case_id is required' });
+
+        console.log(`[UPLOAD] User ${req.auth.userId} uploading file ${req.file.originalname} for case ${case_id}`);
+
+        // Step 1: Upload to MinIO
+        const minioResult = await uploadFile(
+            req.file.buffer,
+            req.file.originalname,
+            case_id,
+            req.auth.org
+        );
+
+        // Step 2: Create record metadata for blockchain
+        const recordId = `REC_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        const recordData = {
+            record_id: recordId,
+            case_id,
+            record_type: record_type || 'Evidence',
             filename: req.file.originalname,
+            file_hash: minioResult.hash,
+            file_size: minioResult.size,
+            minio_object_name: minioResult.objectName,
+            minio_url: minioResult.url,
             mime_type: req.file.mimetype,
-            uploader_org: req.auth.org
+            description: description || '',
+            uploader_org: req.auth.org,
+            uploader_id: req.auth.userId,
+            uploaded_at: minioResult.uploadedAt,
+            created_at: new Date().toISOString()
         };
 
-        if (!metadata.case_id) return res.status(400).json({ error: 'case_id is required' });
+        // Step 3: Always store metadata locally as fallback (even if blockchain fails)
+        const uploadFallbackData = {
+            record_id: recordId,
+            timestamp: new Date().toISOString(),
+            action: 'UPLOAD',
+            actor: req.auth.userId,
+            details: `File uploaded: ${req.file.originalname} (${minioResult.size} bytes, hash: ${minioResult.hash.substring(0, 16)}...)`,
+            value: recordData,
+            txId: `LOCAL_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+            blockchainRecorded: false
+        };
+        saveUploadFallback(uploadFallbackData);
+        console.log(`[UPLOAD] 💾 Upload metadata saved locally as fallback`);
 
-        const result = await backend.uploadRecord(req.auth.userId, req.auth.org, req.file.buffer, metadata);
-        return res.json({ success: true, recordId: result.recordId, fileHash: result.fileHash, message: 'Record uploaded and encrypted successfully' });
+        // Step 4: Store on blockchain (OPTIONAL - skipped if SKIP_BLOCKCHAIN env var is set)
+        // By default, blockchain recording is attempted but won't fail the upload if it doesn't work
+        let blockchainSuccess = false;
+        let blockchainError = null;
+        
+        // Skip blockchain if SKIP_BLOCKCHAIN is set to 'true'
+        const skipBlockchain = process.env.SKIP_BLOCKCHAIN === 'true';
+        
+        if (skipBlockchain) {
+            console.log('[UPLOAD] ⚠️ Blockchain recording SKIPPED (SKIP_BLOCKCHAIN=true). File stored only in MinIO.');
+        } else {
+            try {
+                const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+                
+                await contract.submitTransaction(
+                    'CreateRecord',
+                    JSON.stringify(recordData)
+                );
+
+                console.log(`[UPLOAD] ✅ Record ${recordId} created on blockchain`);
+
+                // Step 5: Add audit entry
+                try {
+                    await contract.submitTransaction(
+                        'AddAudit',
+                        recordId,
+                        req.auth.userId,
+                        'UPLOAD',
+                        `File uploaded: ${req.file.originalname} (${minioResult.size} bytes, hash: ${minioResult.hash.substring(0, 16)}...)`
+                    );
+                    
+                    // Update fallback to mark as blockchain recorded
+                    uploadFallbackData.blockchainRecorded = true;
+                    const uploads = loadUploadsFallback();
+                    const index = uploads.findIndex(u => u.record_id === recordId && u.timestamp === uploadFallbackData.timestamp);
+                    if (index >= 0) {
+                        uploads[index] = uploadFallbackData;
+                        fs.writeFileSync(UPLOADS_FALLBACK_PATH, JSON.stringify(uploads, null, 2));
+                    }
+                } catch (auditErr) {
+                    console.warn('[UPLOAD] Failed to add audit entry:', auditErr.message);
+                }
+
+                await gateway.disconnect();
+                blockchainSuccess = true;
+            } catch (blockchainErr) {
+                console.error('[UPLOAD] Blockchain recording failed (file is still in MinIO):', blockchainErr.message);
+                blockchainError = blockchainErr.message;
+                // Don't fail the entire upload - file is already in MinIO
+                // The blockchain record can be added later when peers are available
+            }
+        }
+
+        // Return success even if blockchain recording failed
+        // File is safely stored in MinIO and can be recorded on blockchain later
+        return res.json({
+            success: true,
+            recordId,
+            fileHash: minioResult.hash,
+            minioUrl: minioResult.url,
+            size: minioResult.size,
+            blockchainRecorded: blockchainSuccess,
+            message: blockchainSuccess 
+                ? 'File uploaded to MinIO and recorded on blockchain successfully'
+                : `File uploaded to MinIO successfully. Blockchain recording pending: ${blockchainError || 'Peers not responding'}`,
+            warning: blockchainError ? `Blockchain not available: ${blockchainError}. File is safe in MinIO and will be recorded later.` : undefined
+        });
     } catch (err) {
         console.error('Upload error:', err.message);
         return res.status(500).json({ error: 'Upload failed', message: err.message });
@@ -544,13 +743,90 @@ app.post('/record/upload', authenticateUser, upload.single('file'), async (req, 
 app.get('/record/:id/download', authenticateUser, async (req, res) => {
     try {
         const recordId = req.params.id;
-        const result = await backend.downloadRecord(req.auth.userId, req.auth.org, recordId);
+        
+        // Check user role for download permission
+        // Forensics Officer cannot download (view-only access)
+        const approvedUsers = loadJSON(APPROVED_PATH);
+        const userEmail = req.headers.authorization?.replace('Bearer ', '').split(':')[0];
+        const user = approvedUsers.get(userEmail);
+        
+        if (!user) {
+            return res.status(403).json({ error: 'User not found', message: 'User is not authorized' });
+        }
+        
+        const userRole = user.role?.toLowerCase();
+        if (userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics') {
+            return res.status(403).json({ 
+                error: 'Permission denied', 
+                message: 'Forensics Officer role has view-only access. Download is not allowed.' 
+            });
+        }
+        
+        // Allowed roles: admin, district_police, investigator
+        console.log(`[DOWNLOAD] User ${req.auth.userId} (role: ${userRole}) downloading record ${recordId}`);
+        
+        let metadata = null;
+        
+        // Try to get record metadata from blockchain first
+        try {
+            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            const result = await contract.evaluateTransaction('ReadRecord', recordId);
+            metadata = JSON.parse(result.toString());
+            
+            // Add audit entry for download
+            try {
+                await contract.submitTransaction(
+                    'AddAudit',
+                    recordId,
+                    req.auth.userId,
+                    'DOWNLOAD',
+                    `File downloaded: ${metadata.filename || recordId}`
+                );
+            } catch (auditErr) {
+                console.warn('[DOWNLOAD] Failed to add audit entry:', auditErr.message);
+            }
+            
+            await gateway.disconnect();
+        } catch (blockchainErr) {
+            console.warn('[DOWNLOAD] Blockchain query failed, trying fallback:', blockchainErr.message);
+            
+            // Fallback: Get metadata from local storage
+            const fallbackUploads = loadUploadsFallback();
+            const fallbackRecord = fallbackUploads.find(u => u.record_id === recordId);
+            
+            if (fallbackRecord && fallbackRecord.value) {
+                metadata = fallbackRecord.value;
+                console.log(`[DOWNLOAD] Using fallback metadata for record ${recordId}`);
+            } else {
+                throw new Error('Record not found in blockchain or local storage');
+            }
+        }
+        
+        if (!metadata) {
+            return res.status(404).json({ error: 'Record not found', message: 'Record metadata not available' });
+        }
 
-        res.setHeader('Content-Type', result.metadata.mime_type || 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${result.metadata.filename}"`);
-        res.setHeader('Content-Length', result.file.length);
+        // If MinIO URL exists, download from MinIO
+        if (metadata.minio_object_name) {
+            const { downloadFile } = require('./minioClient');
+            const fileBuffer = await downloadFile(metadata.minio_object_name);
+            
+            res.setHeader('Content-Type', metadata.mime_type || 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename="${metadata.filename || recordId}"`);
+            res.setHeader('Content-Length', fileBuffer.length);
+            res.setHeader('X-File-Hash', metadata.file_hash || '');
+            res.setHeader('X-Record-ID', recordId);
 
-        return res.send(result.file);
+            console.log(`[DOWNLOAD] ✅ Successfully downloaded ${metadata.filename} (${fileBuffer.length} bytes)`);
+            return res.send(fileBuffer);
+        } else {
+            // Fallback to old method if no MinIO URL (legacy records)
+            const result = await backend.downloadRecord(req.auth.userId, req.auth.org, recordId);
+            res.setHeader('Content-Type', result.metadata.mime_type || 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename="${result.metadata.filename}"`);
+            res.setHeader('Content-Length', result.file.length);
+            return res.send(result.file);
+        }
     } catch (err) {
         console.error('Download error:', err.message);
         return res.status(500).json({ error: 'Download failed', message: err.message });
@@ -560,12 +836,34 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
 app.get('/record/:id/metadata', authenticateUser, async (req, res) => {
     try {
         const recordId = req.params.id;
-        const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
-        const result = await contract.evaluateTransaction('ReadRecord', recordId);
-        await gateway.disconnect();
-
-        const metadata = JSON.parse(result.toString());
-        delete metadata.wrapped_key_ref;
+        let metadata = null;
+        
+        // Try to get from blockchain first
+        try {
+            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            const result = await contract.evaluateTransaction('ReadRecord', recordId);
+            metadata = JSON.parse(result.toString());
+            delete metadata.wrapped_key_ref;
+            await gateway.disconnect();
+        } catch (blockchainErr) {
+            console.warn('[METADATA] Blockchain query failed, trying fallback:', blockchainErr.message);
+            
+            // Fallback: Get metadata from local storage
+            const fallbackUploads = loadUploadsFallback();
+            const fallbackRecord = fallbackUploads.find(u => u.record_id === recordId);
+            
+            if (fallbackRecord && fallbackRecord.value) {
+                metadata = fallbackRecord.value;
+                delete metadata.wrapped_key_ref; // Remove sensitive fields
+                console.log(`[METADATA] Using fallback metadata for record ${recordId}`);
+            } else {
+                throw new Error('Record not found in blockchain or local storage');
+            }
+        }
+        
+        if (!metadata) {
+            return res.status(404).json({ error: 'Record not found', message: 'Record metadata not available' });
+        }
 
         return res.json(metadata);
     } catch (err) {
@@ -593,20 +891,104 @@ app.get('/records/case/:caseId', authenticateUser, async (req, res) => {
 
 app.get('/records', authenticateUser, async (req, res) => {
     try {
-        const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
-        const result = await contract.evaluateTransaction('ListAllRecords');
-        await gateway.disconnect();
+        let records = [];
+        let blockchainRecords = [];
+        
+        // Try to get records from blockchain
+        try {
+            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            const result = await contract.evaluateTransaction('ListAllRecords');
+            await gateway.disconnect();
 
-        const records = JSON.parse(result.toString());
-        const sanitizedRecords = records.map(r => {
+            blockchainRecords = JSON.parse(result.toString());
+            console.log(`[RECORDS] ✅ Retrieved ${blockchainRecords.length} records from blockchain`);
+        } catch (blockchainErr) {
+            console.warn('[RECORDS] Blockchain query failed, using fallback:', blockchainErr.message);
+            console.warn('[RECORDS] This may indicate chaincode is not deployed or peer is not responding');
+            console.warn('[RECORDS] Falling back to local storage...');
+        }
+        
+        // Get fallback data from local storage (uploads_fallback.json)
+        const fallbackUploads = loadUploadsFallback();
+        const fallbackRecords = fallbackUploads.map(upload => {
+            if (upload.value) {
+                return {
+                    record_id: upload.value.record_id || upload.record_id,
+                    case_id: upload.value.case_id,
+                    record_type: upload.value.record_type || 'Evidence',
+                    filename: upload.value.filename,
+                    file_hash: upload.value.file_hash,
+                    file_size: upload.value.file_size,
+                    mime_type: upload.value.mime_type,
+                    uploader_id: upload.value.uploader_id || upload.actor,
+                    uploader_org: upload.value.uploader_org,
+                    uploaded_at: upload.value.uploaded_at || upload.timestamp,
+                    created_at: upload.value.created_at || upload.timestamp,
+                    description: upload.value.description || '',
+                    minio_object_name: upload.value.minio_object_name,
+                    minio_url: upload.value.minio_url,
+                    blockchainRecorded: upload.blockchainRecorded || false,
+                    source: 'fallback'
+                };
+            }
+            return null;
+        }).filter(r => r !== null);
+        
+        console.log(`[RECORDS] Found ${fallbackRecords.length} records in local storage`);
+        
+        // Combine blockchain and fallback records, removing duplicates
+        const combinedRecords = [...blockchainRecords];
+        const blockchainRecordIds = new Set(blockchainRecords.map(r => r.record_id));
+        
+        // Add fallback records that aren't in blockchain
+        fallbackRecords.forEach(fallbackRecord => {
+            if (!blockchainRecordIds.has(fallbackRecord.record_id)) {
+                combinedRecords.push(fallbackRecord);
+            }
+        });
+        
+        // Sanitize records (remove sensitive fields)
+        const sanitizedRecords = combinedRecords.map(r => {
             const { wrapped_key_ref, ...safe } = r;
             return safe;
         });
 
-        return res.json({ count: sanitizedRecords.length, records: sanitizedRecords });
+        return res.json({ 
+            count: sanitizedRecords.length, 
+            records: sanitizedRecords,
+            note: blockchainRecords.length === 0 && fallbackRecords.length > 0 
+                ? 'Showing records from local storage. Blockchain queries are currently unavailable.' 
+                : undefined
+        });
     } catch (err) {
         console.error('List all records error:', err.message);
-        return res.status(500).json({ error: 'Failed to list records', message: err.message });
+        
+        // Fallback: Try to return records from local storage even if everything fails
+        try {
+            const fallbackUploads = loadUploadsFallback();
+            const fallbackRecords = fallbackUploads.map(upload => {
+                if (upload.value) {
+                    const { wrapped_key_ref, ...safe } = upload.value;
+                    return safe;
+                }
+                return null;
+            }).filter(r => r !== null);
+            
+            console.log(`[RECORDS] Fallback: Returning ${fallbackRecords.length} records from local storage`);
+            
+            return res.json({ 
+                count: fallbackRecords.length, 
+                records: fallbackRecords,
+                warning: 'Blockchain queries failed. Showing records from local storage only.',
+                error: err.message
+            });
+        } catch (fallbackErr) {
+            return res.status(500).json({ 
+                error: 'Failed to list records', 
+                message: err.message,
+                fallbackError: fallbackErr.message
+            });
+        }
     }
 });
 
@@ -651,7 +1033,7 @@ app.post('/audit', authenticateUser, async (req, res) => {
         if (!record_id || !action) return res.status(400).json({ error: 'record_id and action are required' });
 
         const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
-        const result = await contract.submitTransaction('AddAudit', record_id, action, details || '');
+        const result = await contract.submitTransaction('AddAudit', record_id, req.auth.userId, action, details || '');
         await gateway.disconnect();
 
         return res.json({ success: true, audit_id: result.toString(), message: 'Audit entry added' });
@@ -661,63 +1043,194 @@ app.post('/audit', authenticateUser, async (req, res) => {
     }
 });
 
+app.get('/audit/trail', authenticateUser, async (req, res) => {
+    try {
+        const recordId = req.query.record_id;
+        
+        let auditData = [];
+        let blockchainData = [];
+        
+        // Try to get data from blockchain
+        try {
+            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            
+            if (recordId) {
+                // Get audit trail for specific record
+                const result = await contract.evaluateTransaction('GetAuditTrail', recordId);
+                blockchainData = JSON.parse(result.toString());
+            } else {
+                // Get all audit entries across all records
+                const result = await contract.evaluateTransaction('GetAllHistory', '1000');
+                const allHistory = JSON.parse(result.toString());
+                
+                // Filter for audit-related transactions
+                blockchainData = allHistory.filter(entry => 
+                    entry.value && (
+                        entry.value.action || 
+                        entry.value.audit_id ||
+                        entry.value.uploader_id
+                    )
+                ).map(entry => ({
+                    timestamp: entry.timestamp,
+                    recordId: entry.recordId || entry.value.record_id,
+                    action: entry.value.action || 'UNKNOWN',
+                    actor: entry.value.actor || entry.value.uploader_id || 'SYSTEM',
+                    details: entry.value.details || JSON.stringify(entry.value),
+                    txId: entry.txId,
+                    source: 'blockchain'
+                }));
+            }
+            
+            await gateway.disconnect();
+        } catch (blockchainErr) {
+            console.warn('[AUDIT TRAIL] Blockchain query failed, using fallback:', blockchainErr.message);
+        }
+        
+        // Get fallback data from local storage
+        const fallbackUploads = loadUploadsFallback();
+        const fallbackData = fallbackUploads
+            .filter(upload => !recordId || upload.record_id === recordId)
+            .map(upload => ({
+                timestamp: upload.timestamp,
+                recordId: upload.record_id,
+                action: upload.action || 'UPLOAD',
+                actor: upload.actor || upload.value?.uploader_id || 'SYSTEM',
+                details: upload.details || `File uploaded: ${upload.value?.filename || 'Unknown'}`,
+                txId: upload.txId,
+                source: 'fallback',
+                blockchainRecorded: upload.blockchainRecorded || false
+            }));
+        
+        // Combine blockchain and fallback data, removing duplicates
+        const combinedData = [...blockchainData];
+        const blockchainRecordIds = new Set(blockchainData.map(a => a.txId));
+        
+        // Add fallback entries that aren't already in blockchain
+        fallbackData.forEach(fallback => {
+            if (!blockchainRecordIds.has(fallback.txId) && 
+                (!recordId || fallback.recordId === recordId)) {
+                combinedData.push(fallback);
+            }
+        });
+        
+        // Sort by timestamp (newest first)
+        auditData = combinedData.sort((a, b) => 
+            new Date(b.timestamp) - new Date(a.timestamp)
+        );
+
+        return res.json({ 
+            success: true, 
+            count: auditData.length,
+            record_id: recordId || 'ALL',
+            audit_trail: auditData 
+        });
+    } catch (err) {
+        console.error('Get audit trail error:', err.message);
+        return res.status(500).json({ error: 'Failed to get audit trail', message: err.message });
+    }
+});
+
 // =========================================================
 // BLOCK HISTORY
 // =========================================================
 app.get('/block-history', authenticateUser, async (req, res) => {
     try {
-        const limit = req.query.limit || 100;
-        const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+        const limit = parseInt(req.query.limit || 100);
+        const transactionsPerBlock = parseInt(req.query.blockSize || 5); // Default: 5 transactions per block
         
-        // Try to call GetAllHistory method
-        // If it doesn't exist, fallback to ListAllRecords and build history from that
-        let result;
-        let history = [];
+        let blockchainHistory = [];
+        let fallbackHistory = [];
         
+        // Try to get data from blockchain
         try {
-            console.log('[BLOCK HISTORY] Attempting to call GetAllHistory...');
-            result = await contract.evaluateTransaction('GetAllHistory', limit.toString());
-            history = JSON.parse(result.toString());
-            console.log(`[BLOCK HISTORY] Successfully retrieved ${history.length} history entries`);
-        } catch (methodErr) {
-            console.warn('[BLOCK HISTORY] GetAllHistory method not available, using fallback approach');
-            console.warn(`[BLOCK HISTORY] Error: ${methodErr.message}`);
+            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
             
-            // Fallback: Get all records and create simple history entries
             try {
+                console.log('[BLOCK HISTORY] Attempting to call GetAllHistory...');
+                const result = await contract.evaluateTransaction('GetAllHistory', limit.toString());
+                blockchainHistory = JSON.parse(result.toString());
+                console.log(`[BLOCK HISTORY] Successfully retrieved ${blockchainHistory.length} history entries from blockchain`);
+            } catch (methodErr) {
+                console.warn('[BLOCK HISTORY] GetAllHistory method not available, trying ListAllRecords');
+                console.warn(`[BLOCK HISTORY] Error: ${methodErr.message}`);
+                
+                // Fallback: Get all records and create simple history entries
                 const recordsResult = await contract.evaluateTransaction('ListAllRecords');
                 const records = JSON.parse(recordsResult.toString());
                 
                 // Create history entries from current records
-                // This won't show full history but will show current state
-                history = records.map(record => ({
-                    txId: 'current',
+                blockchainHistory = records.map(record => ({
+                    txId: `BLOCKCHAIN_${record.record_id || record.id}`,
                     recordId: record.record_id || record.id,
                     timestamp: record.created_at || record.updated_at || new Date().toISOString(),
                     isDelete: false,
+                    action: 'CREATE',
+                    actor: record.uploader_id || 'SYSTEM',
                     value: {
                         record_id: record.record_id || record.id,
                         case_id: record.case_id,
                         record_type: record.record_type,
                         uploader_org: record.uploader_org || record.org
-                    }
-                })).slice(0, parseInt(limit));
+                    },
+                    source: 'blockchain'
+                })).slice(0, limit);
                 
-                console.log(`[BLOCK HISTORY] Fallback: Created ${history.length} entries from current records`);
-            } catch (fallbackErr) {
-                console.error('[BLOCK HISTORY] Fallback also failed:', fallbackErr.message);
-                // Return empty array if both methods fail
-                history = [];
+                console.log(`[BLOCK HISTORY] Fallback: Created ${blockchainHistory.length} entries from current records`);
             }
+            
+            await gateway.disconnect();
+        } catch (blockchainErr) {
+            console.warn('[BLOCK HISTORY] Blockchain query failed, using local fallback:', blockchainErr.message);
         }
         
-        await gateway.disconnect();
+        // Get fallback data from local storage
+        const fallbackUploads = loadUploadsFallback();
+        fallbackHistory = fallbackUploads.map(upload => ({
+            txId: upload.txId,
+            recordId: upload.record_id,
+            timestamp: upload.timestamp,
+            isDelete: false,
+            action: upload.action || 'UPLOAD',
+            actor: upload.actor || upload.value?.uploader_id || 'SYSTEM',
+            value: upload.value || {},
+            source: 'fallback',
+            blockchainRecorded: upload.blockchainRecorded || false
+        }));
+        
+        // Combine blockchain and fallback data, removing duplicates
+        const combinedHistory = [...blockchainHistory];
+        const blockchainTxIds = new Set(blockchainHistory.map(h => h.txId));
+        
+        // Add fallback entries that aren't already in blockchain
+        fallbackHistory.forEach(fallback => {
+            if (!blockchainTxIds.has(fallback.txId)) {
+                combinedHistory.push(fallback);
+            }
+        });
+        
+        // Sort by timestamp (oldest first for block grouping)
+        const sortedHistory = combinedHistory
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            .slice(0, limit);
+        
+        // Group transactions into blocks for testing
+        // This simulates block creation without requiring peer endorsements
+        const blocks = groupIntoBlocks(sortedHistory, transactionsPerBlock);
+        
+        // Also return individual transactions for backward compatibility
+        const transactions = sortedHistory
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first for display
+
+        console.log(`[BLOCK HISTORY] Created ${blocks.length} blocks from ${sortedHistory.length} transactions`);
 
         return res.json({ 
             success: true, 
-            count: history.length, 
-            history: history,
-            note: history.length === 0 ? 'No history available. Chaincode may need to be redeployed with GetAllHistory method.' : undefined
+            count: sortedHistory.length,
+            blockCount: blocks.length,
+            transactionsPerBlock: transactionsPerBlock,
+            blocks: blocks, // New: Grouped blocks for UI display
+            transactions: transactions, // Individual transactions for backward compatibility
+            note: sortedHistory.length === 0 ? 'No history available. Upload some files to see block history.' : undefined
         });
     } catch (err) {
         console.error('Get block history error:', err.message);
