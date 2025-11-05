@@ -378,38 +378,19 @@ async getContract(userId, org) {
     console.log(`[BACKEND DEBUG] Creating Gateway and connecting...`);
     const gateway = new Gateway();
     
-    // Check if SELF_COMMIT mode is enabled (for local testing)
-    const selfCommitMode = process.env.SELF_COMMIT === 'true';
-    
-    if (selfCommitMode) {
-        console.log(`[BACKEND DEBUG] 🔧 SELF-COMMIT mode enabled (for local testing)`);
-        // Self-commit configuration: immediate block creation and commit
-        await gateway.connect(ccp, {
-            wallet,
-            identity: userId,
-            discovery: { enabled: false, asLocalhost: true },  // Direct peer connection
-            eventHandlerOptions: {
-                commitTimeout: 60,  // Reduced timeout for faster commit
-                strategy: null  // Bypass event wait (rely on immediate orderer block creation)
-            },
-            queryHandlerOptions: {
-                timeout: 30
-            }
-        });
-        console.log(`[BACKEND DEBUG] Gateway connected with SELF-COMMIT configuration`);
-    } else {
-        // Standard configuration
-        await gateway.connect(ccp, {
-            wallet,
-            identity: userId,
-            discovery: { enabled: false, asLocalhost: true },
-            eventHandlerOptions: {
-                commitTimeout: 300,
-                strategy: null
-            }
-        });
-        console.log(`[BACKEND DEBUG] Gateway connected with standard configuration`);
-    }
+    // Standard configuration - disable discovery to avoid access denied errors
+    // Multi-org endorsement will still work if both peers are in connection profile
+    // or transactions explicitly specify multiple peers
+    await gateway.connect(ccp, {
+        wallet,
+        identity: userId,
+        discovery: { enabled: false, asLocalhost: true },  // Disable discovery to avoid access denied error
+        eventHandlerOptions: {
+            commitTimeout: 300,
+            strategy: null
+        }
+    });
+    console.log(`[BACKEND DEBUG] Gateway connected with standard configuration (discovery disabled to avoid access denied)`);
 
     console.log(`[BACKEND DEBUG] Getting network: ${this.channelName}...`);
     const network = await gateway.getNetwork(this.channelName);
@@ -421,7 +402,7 @@ async getContract(userId, org) {
 
     console.log(`✅ Connected to Fabric network as ${userId} from ${orgLabel}`);
 
-    return { contract, gateway, mspId };
+    return { contract, gateway, mspId, network };
 }
 
     
@@ -589,6 +570,30 @@ async getContract(userId, org) {
         } catch (err) {
             throw new Error(`Failed to get audit trail: ${err.message}`);
         }
+    }
+
+    /**
+     * Get all blocks from blockchain
+     */
+    async getAllBlocks(userId, org) {
+        const ledgerInfo = require('./ledger-info');
+        return await ledgerInfo.getAllBlocks(userId, org);
+    }
+
+    /**
+     * Get a specific block by number
+     */
+    async getBlock(blockNumber, userId, org) {
+        const ledgerInfo = require('./ledger-info');
+        return await ledgerInfo.getBlock(blockNumber, userId, org);
+    }
+
+    /**
+     * Get blockchain info (height, latest block hash, etc.)
+     */
+    async getBlockchainInfo(userId, org) {
+        const ledgerInfo = require('./ledger-info');
+        return await ledgerInfo.getBlockchainInfo(userId, org);
     }
 }
 

@@ -557,6 +557,19 @@ const upload = multer({
 });
 
 // =========================================================
+// Helper Functions
+// =========================================================
+/**
+ * Get admin identity for blockchain operations (has Writers policy)
+ * @param {string} org - Organization name (Org1 or Org2)
+ * @returns {string} Admin identity (AdminOrg1 or AdminOrg2)
+ */
+function getAdminIdentity(org) {
+    const orgForBlockchain = org === 'Org2' ? 'Org2' : 'Org1';
+    return orgForBlockchain === 'Org2' ? 'AdminOrg2' : 'AdminOrg1';
+}
+
+// =========================================================
 // Authentication Middleware
 // =========================================================
 function authenticateUser(req, res, next) {
@@ -679,12 +692,18 @@ app.post('/record/upload', upload.single('file'), authenticateUser, async (req, 
             console.log('[UPLOAD] ⚠️ Blockchain recording SKIPPED (SKIP_BLOCKCHAIN=true). File stored only in MinIO.');
         } else {
             try {
-                const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+                // Use admin identity for blockchain operations (has Writers policy)
+                // User authentication is still maintained via req.auth.userId
+                const adminId = getAdminIdentity(req.auth.org);
                 
-                await contract.submitTransaction(
-                    'CreateRecord',
-                    JSON.stringify(recordData)
-                );
+                console.log(`[UPLOAD] Using ${adminId} identity for blockchain operation (user: ${req.auth.userId})`);
+                const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
+                
+                // Standard submission - uses peer from connection profile
+                // Note: Multi-org endorsement requires both peers; with discovery disabled, 
+                // this uses the peer from the connection profile. If multi-org policy requires 
+                // both orgs, transactions may need explicit peer specification.
+                await contract.submitTransaction('CreateRecord', JSON.stringify(recordData));
 
                 console.log(`[UPLOAD] ✅ Record ${recordId} created on blockchain`);
 
@@ -693,7 +712,7 @@ app.post('/record/upload', upload.single('file'), authenticateUser, async (req, 
                     await contract.submitTransaction(
                         'AddAudit',
                         recordId,
-                        req.auth.userId,
+                        req.auth.userId,  // Keep actual user ID in audit trail
                         'UPLOAD',
                         `File uploaded: ${req.file.originalname} (${minioResult.size} bytes, hash: ${minioResult.hash.substring(0, 16)}...)`
                     );
@@ -769,7 +788,9 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
         
         // Try to get record metadata from blockchain first
         try {
-            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            // Use admin identity for blockchain operations (has Writers policy)
+            const adminId = getAdminIdentity(req.auth.org);
+            const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
             const result = await contract.evaluateTransaction('ReadRecord', recordId);
             metadata = JSON.parse(result.toString());
             
@@ -778,7 +799,7 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
                 await contract.submitTransaction(
                     'AddAudit',
                     recordId,
-                    req.auth.userId,
+                    req.auth.userId,  // Keep actual user ID in audit trail
                     'DOWNLOAD',
                     `File downloaded: ${metadata.filename || recordId}`
                 );
@@ -840,7 +861,9 @@ app.get('/record/:id/metadata', authenticateUser, async (req, res) => {
         
         // Try to get from blockchain first
         try {
-            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            // Use admin identity for blockchain operations (has Writers policy)
+            const adminId = getAdminIdentity(req.auth.org);
+            const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
             const result = await contract.evaluateTransaction('ReadRecord', recordId);
             metadata = JSON.parse(result.toString());
             delete metadata.wrapped_key_ref;
@@ -896,7 +919,9 @@ app.get('/records', authenticateUser, async (req, res) => {
         
         // Try to get records from blockchain
         try {
-            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            // Use admin identity for blockchain operations (has Writers policy)
+            const adminId = getAdminIdentity(req.auth.org);
+            const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
             const result = await contract.evaluateTransaction('ListAllRecords');
             await gateway.disconnect();
 
@@ -1013,7 +1038,9 @@ app.post('/policy', authenticateUser, async (req, res) => {
 app.get('/policy/:id', authenticateUser, async (req, res) => {
     try {
         const policyId = req.params.id;
-        const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+        // Use admin identity for blockchain operations (has Writers policy)
+        const adminId = getAdminIdentity(req.auth.org);
+        const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
         const result = await contract.evaluateTransaction('GetPolicy', policyId);
         await gateway.disconnect();
 
@@ -1032,7 +1059,9 @@ app.post('/audit', authenticateUser, async (req, res) => {
         const { record_id, action, details } = req.body;
         if (!record_id || !action) return res.status(400).json({ error: 'record_id and action are required' });
 
-        const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+        // Use admin identity for blockchain operations (has Writers policy)
+        const adminId = getAdminIdentity(req.auth.org);
+        const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
         const result = await contract.submitTransaction('AddAudit', record_id, req.auth.userId, action, details || '');
         await gateway.disconnect();
 
@@ -1052,7 +1081,9 @@ app.get('/audit/trail', authenticateUser, async (req, res) => {
         
         // Try to get data from blockchain
         try {
-            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            // Use admin identity for blockchain operations (has Writers policy)
+            const adminId = getAdminIdentity(req.auth.org);
+            const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
             
             if (recordId) {
                 // Get audit trail for specific record
@@ -1131,19 +1162,126 @@ app.get('/audit/trail', authenticateUser, async (req, res) => {
 });
 
 // =========================================================
-// BLOCK HISTORY
+// BLOCK HISTORY & BLOCKCHAIN QUERIES
 // =========================================================
+
+// Get real blocks from blockchain
+app.get('/blocks', authenticateUser, async (req, res) => {
+    try {
+        const adminId = getAdminIdentity(req.auth.org);
+        console.log('[BLOCKS] Querying real blockchain blocks...');
+        
+        const blocks = await backend.getAllBlocks(adminId, req.auth.org);
+        
+        console.log(`[BLOCKS] ✅ Retrieved ${blocks.length} blocks from blockchain`);
+        
+        return res.json({
+            success: true,
+            count: blocks.length,
+            blocks: blocks,
+            source: 'blockchain'
+        });
+    } catch (err) {
+        console.error('[BLOCKS] Error querying blocks:', err.message);
+        return res.status(500).json({
+            error: 'Failed to query blocks',
+            message: err.message
+        });
+    }
+});
+
+// Get a specific block by number
+app.get('/blocks/:blockNumber', authenticateUser, async (req, res) => {
+    try {
+        const blockNumber = parseInt(req.params.blockNumber);
+        if (isNaN(blockNumber) || blockNumber < 0) {
+            return res.status(400).json({ error: 'Invalid block number' });
+        }
+        
+        const adminId = getAdminIdentity(req.auth.org);
+        console.log(`[BLOCKS] Querying block #${blockNumber}...`);
+        
+        const block = await backend.getBlock(blockNumber, adminId, req.auth.org);
+        
+        console.log(`[BLOCKS] ✅ Retrieved block #${blockNumber}`);
+        
+        return res.json({
+            success: true,
+            block: block,
+            source: 'blockchain'
+        });
+    } catch (err) {
+        console.error(`[BLOCKS] Error querying block ${req.params.blockNumber}:`, err.message);
+        return res.status(500).json({
+            error: 'Failed to query block',
+            message: err.message
+        });
+    }
+});
+
+// Get blockchain info (height, latest block hash, etc.)
+app.get('/blockchain/info', authenticateUser, async (req, res) => {
+    try {
+        const adminId = getAdminIdentity(req.auth.org);
+        console.log('[BLOCKCHAIN-INFO] Querying blockchain info...');
+        
+        const info = await backend.getBlockchainInfo(adminId, req.auth.org);
+        
+        console.log(`[BLOCKCHAIN-INFO] ✅ Blockchain height: ${info.height}`);
+        
+        return res.json({
+            success: true,
+            info: info,
+            source: 'blockchain'
+        });
+    } catch (err) {
+        console.error('[BLOCKCHAIN-INFO] Error querying blockchain info:', err.message);
+        return res.status(500).json({
+            error: 'Failed to query blockchain info',
+            message: err.message
+        });
+    }
+});
+
+// Enhanced block history endpoint - tries real blocks first, then falls back
 app.get('/block-history', authenticateUser, async (req, res) => {
     try {
         const limit = parseInt(req.query.limit || 100);
-        const transactionsPerBlock = parseInt(req.query.blockSize || 5); // Default: 5 transactions per block
+        const useRealBlocks = req.query.real === 'true' || req.query.real === '1';
         
+        // Try to get real blocks from blockchain first
+        let realBlocks = [];
+        let blockchainInfo = null;
+        
+        if (useRealBlocks) {
+            try {
+                const adminId = getAdminIdentity(req.auth.org);
+                console.log('[BLOCK HISTORY] Attempting to query real blockchain blocks...');
+                
+                // Get blockchain info
+                blockchainInfo = await backend.getBlockchainInfo(adminId, req.auth.org);
+                
+                // Get all blocks
+                realBlocks = await backend.getAllBlocks(adminId, req.auth.org);
+                
+                // Limit to requested number
+                if (limit > 0) {
+                    realBlocks = realBlocks.slice(-limit); // Get latest blocks
+                }
+                
+                console.log(`[BLOCK HISTORY] ✅ Retrieved ${realBlocks.length} real blocks from blockchain`);
+            } catch (realBlocksErr) {
+                console.warn('[BLOCK HISTORY] Failed to get real blocks, falling back to chaincode queries:', realBlocksErr.message);
+            }
+        }
+        
+        // Fallback: Try chaincode queries (GetAllHistory, ListAllRecords)
         let blockchainHistory = [];
         let fallbackHistory = [];
         
-        // Try to get data from blockchain
         try {
-            const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+            const adminId = getAdminIdentity(req.auth.org);
+            const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
             
             try {
                 console.log('[BLOCK HISTORY] Attempting to call GetAllHistory...');
@@ -1152,30 +1290,31 @@ app.get('/block-history', authenticateUser, async (req, res) => {
                 console.log(`[BLOCK HISTORY] Successfully retrieved ${blockchainHistory.length} history entries from blockchain`);
             } catch (methodErr) {
                 console.warn('[BLOCK HISTORY] GetAllHistory method not available, trying ListAllRecords');
-                console.warn(`[BLOCK HISTORY] Error: ${methodErr.message}`);
                 
-                // Fallback: Get all records and create simple history entries
-                const recordsResult = await contract.evaluateTransaction('ListAllRecords');
-                const records = JSON.parse(recordsResult.toString());
-                
-                // Create history entries from current records
-                blockchainHistory = records.map(record => ({
-                    txId: `BLOCKCHAIN_${record.record_id || record.id}`,
-                    recordId: record.record_id || record.id,
-                    timestamp: record.created_at || record.updated_at || new Date().toISOString(),
-                    isDelete: false,
-                    action: 'CREATE',
-                    actor: record.uploader_id || 'SYSTEM',
-                    value: {
-                        record_id: record.record_id || record.id,
-                        case_id: record.case_id,
-                        record_type: record.record_type,
-                        uploader_org: record.uploader_org || record.org
-                    },
-                    source: 'blockchain'
-                })).slice(0, limit);
-                
-                console.log(`[BLOCK HISTORY] Fallback: Created ${blockchainHistory.length} entries from current records`);
+                try {
+                    const recordsResult = await contract.evaluateTransaction('ListAllRecords');
+                    const records = JSON.parse(recordsResult.toString());
+                    
+                    blockchainHistory = records.map(record => ({
+                        txId: `BLOCKCHAIN_${record.record_id || record.id}`,
+                        recordId: record.record_id || record.id,
+                        timestamp: record.created_at || record.updated_at || new Date().toISOString(),
+                        isDelete: false,
+                        action: 'CREATE',
+                        actor: record.uploader_id || 'SYSTEM',
+                        value: {
+                            record_id: record.record_id || record.id,
+                            case_id: record.case_id,
+                            record_type: record.record_type,
+                            uploader_org: record.uploader_org || record.org
+                        },
+                        source: 'blockchain'
+                    })).slice(0, limit);
+                    
+                    console.log(`[BLOCK HISTORY] Fallback: Created ${blockchainHistory.length} entries from current records`);
+                } catch (listErr) {
+                    console.warn('[BLOCK HISTORY] ListAllRecords also failed:', listErr.message);
+                }
             }
             
             await gateway.disconnect();
@@ -1197,47 +1336,59 @@ app.get('/block-history', authenticateUser, async (req, res) => {
             blockchainRecorded: upload.blockchainRecorded || false
         }));
         
-        // Combine blockchain and fallback data, removing duplicates
+        // If we have real blocks, return them
+        if (realBlocks.length > 0) {
+            return res.json({
+                success: true,
+                count: realBlocks.length,
+                blockCount: realBlocks.length,
+                blockchainInfo: blockchainInfo,
+                blocks: realBlocks,
+                source: 'blockchain',
+                note: 'Real blocks from blockchain ledger'
+            });
+        }
+        
+        // Otherwise, combine chaincode history and fallback
         const combinedHistory = [...blockchainHistory];
         const blockchainTxIds = new Set(blockchainHistory.map(h => h.txId));
         
-        // Add fallback entries that aren't already in blockchain
         fallbackHistory.forEach(fallback => {
             if (!blockchainTxIds.has(fallback.txId)) {
                 combinedHistory.push(fallback);
             }
         });
         
-        // Sort by timestamp (oldest first for block grouping)
         const sortedHistory = combinedHistory
             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
             .slice(0, limit);
         
-        // Group transactions into blocks for testing
-        // This simulates block creation without requiring peer endorsements
+        // Group transactions into blocks for display (if no real blocks available)
+        const transactionsPerBlock = parseInt(req.query.blockSize || 5);
         const blocks = groupIntoBlocks(sortedHistory, transactionsPerBlock);
         
-        // Also return individual transactions for backward compatibility
         const transactions = sortedHistory
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first for display
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-        console.log(`[BLOCK HISTORY] Created ${blocks.length} blocks from ${sortedHistory.length} transactions`);
+        console.log(`[BLOCK HISTORY] Created ${blocks.length} simulated blocks from ${sortedHistory.length} transactions`);
 
         return res.json({ 
             success: true, 
             count: sortedHistory.length,
             blockCount: blocks.length,
             transactionsPerBlock: transactionsPerBlock,
-            blocks: blocks, // New: Grouped blocks for UI display
-            transactions: transactions, // Individual transactions for backward compatibility
-            note: sortedHistory.length === 0 ? 'No history available. Upload some files to see block history.' : undefined
+            blocks: blocks,
+            transactions: transactions,
+            source: 'simulated',
+            note: sortedHistory.length === 0 
+                ? 'No history available. Upload some files to see block history.' 
+                : 'Using simulated blocks. Query with ?real=true to get real blockchain blocks.'
         });
     } catch (err) {
         console.error('Get block history error:', err.message);
         return res.status(500).json({ 
             error: 'Failed to get block history', 
-            message: err.message,
-            hint: 'The GetAllHistory chaincode method may not be deployed. Please redeploy chaincode version 1.1 or later.'
+            message: err.message
         });
     }
 });
@@ -1245,7 +1396,9 @@ app.get('/block-history', authenticateUser, async (req, res) => {
 app.get('/record/:id/history', authenticateUser, async (req, res) => {
     try {
         const recordId = req.params.id;
-        const { contract, gateway } = await backend.getContract(req.auth.userId, req.auth.org);
+        // Use admin identity for blockchain operations (has Writers policy)
+        const adminId = getAdminIdentity(req.auth.org);
+        const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
         const result = await contract.evaluateTransaction('GetRecordHistory', recordId);
         await gateway.disconnect();
 
@@ -1285,6 +1438,45 @@ app.get('/vault/status', async (req, res) => {
         });
     } catch (err) {
         return res.status(503).json({ vault_connected: false, error: err.message });
+    }
+});
+
+// Get TLS certificates (for connection profile generation)
+app.get('/certificates/orderer', async (req, res) => {
+    try {
+        const ledgerInfo = require('./ledger-info');
+        const cert = await ledgerInfo.getOrdererTLSCertificate();
+        return res.json({
+            success: true,
+            certificate: cert,
+            type: 'orderer'
+        });
+    } catch (err) {
+        console.error('[CERTIFICATES] Error getting orderer certificate:', err.message);
+        return res.status(500).json({
+            error: 'Failed to get orderer certificate',
+            message: err.message
+        });
+    }
+});
+
+app.get('/certificates/peer/:org', async (req, res) => {
+    try {
+        const org = req.params.org || 'Org1';
+        const ledgerInfo = require('./ledger-info');
+        const cert = ledgerInfo.loadTLSCertificate(org, 'peer');
+        return res.json({
+            success: true,
+            certificate: cert,
+            organization: org,
+            type: 'peer'
+        });
+    } catch (err) {
+        console.error(`[CERTIFICATES] Error getting peer certificate for ${req.params.org}:`, err.message);
+        return res.status(500).json({
+            error: 'Failed to get peer certificate',
+            message: err.message
+        });
     }
 });
 

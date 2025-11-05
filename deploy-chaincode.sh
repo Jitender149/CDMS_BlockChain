@@ -16,7 +16,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHAINCODE_NAME="cdmscontract"
 CHAINCODE_LANGUAGE="javascript"
 CHANNEL_NAME="mychannel"
-CC_VERSION="1.4"  # Updated role permissions: district_police, investigator, forensics_officer, admin
+CC_VERSION="1.7"  # Normal mode: Multi-org endorsement policy (default)
+# Using default endorsement policy: AND('Org1MSP.member', 'Org2MSP.member')
+# This requires endorsements from both Org1 and Org2
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -71,9 +73,11 @@ echo ""
 
 echo -e "${YELLOW}Step 4: Deploying chaincode to network...${NC}"
 echo "Chaincode will be deployed from: ${CHAINCODE_PATH}"
+echo "Endorsement Policy: Default (AND('Org1MSP.member', 'Org2MSP.member')) - requires both orgs"
 echo "This may take a few minutes..."
 echo ""
 
+# Deploy with default multi-org endorsement policy
 ./network.sh deployCC \
     -ccn ${CHAINCODE_NAME} \
     -ccp ${CHAINCODE_PATH} \

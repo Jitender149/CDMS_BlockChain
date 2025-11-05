@@ -40,5 +40,13 @@
     "org": "A",
     "status": "pending",
     "walletId": "balleballe"
+  },
+  {
+    "username": "admin2",
+    "email": "example2@gmail.com",
+    "password": "$2b$10$SHi80nfUqIyHx3zJe2i43OY.aXzMuaWI2WfBWvj.xJzYOAzxfu51G",
+    "role": "admin",
+    "org": "B",
+    "walletId": "AdminOrg2"
   }
 ]

@@ -17,8 +17,8 @@ Write-Host "Step 2: Starting network with CA..." -ForegroundColor Yellow
 wsl bash -c "./network.sh up createChannel -ca"
 
 Write-Host ""
-Write-Host "Step 3: Deploying YOUR chaincode v1.4..." -ForegroundColor Yellow
-wsl bash -c "./network.sh deployCC -ccn cdmscontract -ccp /mnt/c/CDMS_Blockchain/chaincode -ccl javascript -ccv 1.4"
+Write-Host "Step 3: Deploying chaincode v1.7 with normal mode (multi-org policy)..." -ForegroundColor Yellow
+wsl bash -c "cd /mnt/c/CDMS_Blockchain && bash deploy-chaincode.sh"
 
 Write-Host ""
 Write-Host "Step 4: Verifying containers..." -ForegroundColor Green

@@ -115,21 +115,34 @@ const UploadPage = () => {
       // Backend will automatically determine userId from email via approved_users.json
       const authHeader = `Bearer ${authUser.email}:${authUser.org}`;
 
+      console.log('[UPLOAD] Sending request to:', `${API_URL}/record/upload`);
+      console.log('[UPLOAD] Auth header:', authHeader);
+      console.log('[UPLOAD] File:', formData.file.name, formData.file.size, 'bytes');
+
       const response = await fetch(`${API_URL}/record/upload`, {
         method: 'POST',
         headers: {
           'Authorization': authHeader
+          // DO NOT set Content-Type for FormData - browser will set it automatically with boundary
         },
         body: formDataToSend
       });
 
       setUploadStatus(prev => ({ ...prev, progress: 80 }));
 
-      const result = await response.json();
-
+      // Check if response is ok before parsing JSON
       if (!response.ok) {
-        throw new Error(result.message || result.error || 'Upload failed');
+        let errorMessage = 'Upload failed';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+        } catch (parseError) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
+
+      const result = await response.json();
 
       setUploadStatus({
         uploading: false,
@@ -177,10 +190,27 @@ const UploadPage = () => {
 
     } catch (error) {
       console.error('Upload error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+      
+      // Provide more helpful error messages
+      let errorMessage = error.message || 'Failed to upload file';
+      
+      if (error.message === 'Failed to fetch') {
+        errorMessage = 'Network error: Could not connect to server. Please check if the backend is running and accessible.';
+      } else if (error.message.includes('CORS')) {
+        errorMessage = 'CORS error: Cross-origin request blocked. Please check backend CORS configuration.';
+      } else if (error.message.includes('NetworkError')) {
+        errorMessage = 'Network error: Please check your internet connection and ensure the backend server is running.';
+      }
+      
       setUploadStatus({
         uploading: false,
         success: false,
-        error: error.message || 'Failed to upload file',
+        error: errorMessage,
         progress: 0,
         recordId: null,
         fileHash: null,
