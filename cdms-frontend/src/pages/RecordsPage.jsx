@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Upload, Eye, Download, Loader2, AlertCircle, ExternalLink } from "lucide-react";
+import { Search, Upload, Eye, Download, Loader2, AlertCircle, ExternalLink, X, FileText } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 
@@ -15,6 +15,9 @@ const RecordsPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [downloadingId, setDownloadingId] = useState(null);
+  const [viewingFile, setViewingFile] = useState(null);
+  const [fileBlobUrl, setFileBlobUrl] = useState(null);
+  const [fileContentType, setFileContentType] = useState(null);
 
   useEffect(() => {
     fetchRecords();
@@ -61,8 +64,9 @@ const RecordsPage = () => {
 
       // Check if user has download permission
       const userRole = authUser.role?.toLowerCase();
-      if (userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics') {
-        alert('Permission denied: Forensics Officer role has view-only access. Download is not allowed.');
+      // View-only roles: forensics_officer, judiciary
+      if (userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics' || userRole === 'judiciary') {
+        alert(`Permission denied: ${authUser.role} role has view-only access. Download is not allowed. Use the View button to see the file.`);
         setDownloadingId(null);
         return;
       }
@@ -107,7 +111,57 @@ const RecordsPage = () => {
     }
   };
 
-  const handleView = async (recordId) => {
+  const handleViewFile = async (recordId) => {
+    try {
+      if (!authUser) {
+        throw new Error("User not authenticated");
+      }
+
+      const authHeader = `Bearer ${authUser.email}:${authUser.org}`;
+      
+      // Open file in new tab for viewing (view-only endpoint)
+      const viewUrl = `${API_URL}/record/${recordId}/view`;
+      
+      // Fetch file with authorization header
+      const response = await fetch(viewUrl, {
+        headers: {
+          'Authorization': authHeader
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to view file");
+      }
+
+      // Get file as blob
+      const blob = await response.blob();
+      const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+      
+      // Create object URL for viewing
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      // Try to open in new tab
+      const newWindow = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      
+      // If popup was blocked, show in modal
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        showFileInModal(blobUrl, contentType);
+      } else {
+        // Clean up blob URL after a delay (file should be loaded by then)
+        setTimeout(() => {
+          window.URL.revokeObjectURL(blobUrl);
+        }, 1000);
+      }
+      
+      console.log(`✅ Successfully opened file for viewing`);
+    } catch (err) {
+      console.error("View file error:", err);
+      alert(err.message || "Failed to view file");
+    }
+  };
+  
+  const handleViewMetadata = async (recordId) => {
     try {
       if (!authUser) {
         throw new Error("User not authenticated");
@@ -130,16 +184,36 @@ const RecordsPage = () => {
       // Show metadata in a modal or alert for now (can be improved with a modal component)
       alert(`Record Details:\n\nRecord ID: ${metadata.record_id || recordId}\nCase ID: ${metadata.case_id || 'N/A'}\nType: ${metadata.record_type || 'N/A'}\nFilename: ${metadata.filename || 'N/A'}\nUploader: ${metadata.uploader_id || 'N/A'}\nOrganization: ${metadata.uploader_org || 'N/A'}\nCreated: ${metadata.created_at || 'N/A'}`);
     } catch (err) {
-      console.error("View error:", err);
+      console.error("View metadata error:", err);
       alert(err.message || "Failed to view record details");
     }
+  };
+  
+  const showFileInModal = (blobUrl, contentType) => {
+    setFileBlobUrl(blobUrl);
+    setFileContentType(contentType);
+    setViewingFile(true);
+  };
+  
+  const closeFileModal = () => {
+    if (fileBlobUrl) {
+      window.URL.revokeObjectURL(fileBlobUrl);
+    }
+    setViewingFile(false);
+    setFileBlobUrl(null);
+    setFileContentType(null);
   };
 
   const canDownload = () => {
     if (!authUser) return false;
     const userRole = authUser.role?.toLowerCase();
-    // Forensics Officer cannot download (view-only)
-    return !(userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics');
+    // View-only roles: forensics_officer, judiciary (cannot download)
+    return !(userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics' || userRole === 'judiciary');
+  };
+  
+  const canView = () => {
+    // All authenticated users can view files
+    return !!authUser;
   };
 
   const filteredRecords = records.filter(record => {
@@ -348,12 +422,21 @@ const RecordsPage = () => {
                     <td className="py-4 px-4">
                       <div className="flex space-x-2">
                         <button
-                          onClick={() => handleView(record.record_id || record.id)}
+                          onClick={() => handleViewMetadata(record.record_id || record.id)}
                           className="p-2 hover:bg-blue-100 rounded-lg transition"
-                          title="View Details"
+                          title="View Metadata"
                         >
                           <Eye className="w-4 h-4 text-blue-600" />
                         </button>
+                        {canView() && (
+                          <button
+                            onClick={() => handleViewFile(record.record_id || record.id)}
+                            className="p-2 hover:bg-purple-100 rounded-lg transition"
+                            title="View File (View-only)"
+                          >
+                            <FileText className="w-4 h-4 text-purple-600" />
+                          </button>
+                        )}
                         {canDownload() && (
                           <button
                             onClick={() => handleDownload(record.record_id || record.id)}
@@ -377,6 +460,68 @@ const RecordsPage = () => {
           </table>
         </div>
       </div>
+      
+      {/* File View Modal */}
+      {viewingFile && fileBlobUrl && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">View File</h3>
+              <button
+                onClick={closeFileModal}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+                title="Close"
+              >
+                <X className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {fileContentType?.startsWith('image/') ? (
+                <img 
+                  src={fileBlobUrl} 
+                  alt="File preview" 
+                  className="max-w-full h-auto mx-auto"
+                  style={{ maxHeight: 'calc(90vh - 120px)' }}
+                />
+              ) : fileContentType === 'application/pdf' ? (
+                <iframe
+                  src={fileBlobUrl}
+                  className="w-full"
+                  style={{ height: 'calc(90vh - 120px)', border: 'none' }}
+                  title="PDF Preview"
+                />
+              ) : fileContentType?.startsWith('text/') ? (
+                <iframe
+                  src={fileBlobUrl}
+                  className="w-full"
+                  style={{ height: 'calc(90vh - 120px)', border: 'none' }}
+                  title="Text Preview"
+                />
+              ) : (
+                <div className="text-center py-8">
+                  <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 mb-2">File preview not available</p>
+                  <p className="text-sm text-gray-500">Content Type: {fileContentType}</p>
+                  <p className="text-sm text-gray-500 mt-2">This file type cannot be displayed inline.</p>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t bg-gray-50">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">
+                  <strong>Note:</strong> This is a view-only mode. Download is not available for your role.
+                </p>
+                <button
+                  onClick={closeFileModal}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

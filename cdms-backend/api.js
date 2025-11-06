@@ -785,10 +785,11 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
         }
         
         const userRole = user.role?.toLowerCase();
-        if (userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics') {
+        // View-only roles: forensics_officer, judiciary
+        if (userRole === 'forensics_officer' || userRole === 'forensicofficer' || userRole === 'forensics' || userRole === 'judiciary') {
             return res.status(403).json({ 
                 error: 'Permission denied', 
-                message: 'Forensics Officer role has view-only access. Download is not allowed.' 
+                message: `${user.role} role has view-only access. Download is not allowed.` 
             });
         }
         
@@ -862,6 +863,90 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
     } catch (err) {
         console.error('Download error:', err.message);
         return res.status(500).json({ error: 'Download failed', message: err.message });
+    }
+});
+
+// View-only endpoint - serves file for viewing (not download)
+app.get('/record/:id/view', authenticateUser, async (req, res) => {
+    try {
+        const recordId = req.params.id;
+        
+        console.log(`[VIEW] User ${req.auth.userId} viewing record ${recordId}`);
+        
+        let metadata = null;
+        
+        // Try to get record metadata from blockchain first
+        try {
+            // Use admin identity for blockchain operations (has Writers policy)
+            const adminId = getAdminIdentity(req.auth.org);
+            const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
+            const result = await contract.evaluateTransaction('ReadRecord', recordId);
+            metadata = JSON.parse(result.toString());
+            
+            // Add audit entry for view
+            try {
+                await contract.submitTransaction(
+                    'AddAudit',
+                    recordId,
+                    req.auth.userId,  // Keep actual user ID in audit trail
+                    'VIEW',
+                    `File viewed: ${metadata.filename || recordId}`
+                );
+            } catch (auditErr) {
+                console.warn('[VIEW] Failed to add audit entry:', auditErr.message);
+            }
+            
+            await gateway.disconnect();
+        } catch (blockchainErr) {
+            console.warn('[VIEW] Blockchain query failed, trying fallback:', blockchainErr.message);
+            
+            // Fallback: Get metadata from local storage
+            const fallbackUploads = loadUploadsFallback();
+            const fallbackRecord = fallbackUploads.find(u => u.record_id === recordId);
+            
+            if (fallbackRecord && fallbackRecord.value) {
+                metadata = fallbackRecord.value;
+                console.log(`[VIEW] Using fallback metadata for record ${recordId}`);
+            } else {
+                throw new Error('Record not found in blockchain or local storage');
+            }
+        }
+        
+        if (!metadata) {
+            return res.status(404).json({ error: 'Record not found', message: 'Record metadata not available' });
+        }
+
+        // If MinIO URL exists, serve file from MinIO for viewing
+        if (metadata.minio_object_name) {
+            const { downloadFile } = require('./minioClient');
+            const fileBuffer = await downloadFile(metadata.minio_object_name);
+            
+            // Set headers for inline viewing (not download)
+            res.setHeader('Content-Type', metadata.mime_type || 'application/octet-stream');
+            res.setHeader('Content-Disposition', `inline; filename="${metadata.filename || recordId}"`); // inline instead of attachment
+            res.setHeader('Content-Length', fileBuffer.length);
+            res.setHeader('X-File-Hash', metadata.file_hash || '');
+            res.setHeader('X-Record-ID', recordId);
+            res.setHeader('X-Content-Type-Options', 'nosniff'); // Prevent MIME type sniffing
+            
+            // Add viewport meta tag for images/PDFs (handled by browser)
+            // For security, we don't allow download via right-click prevention
+            // Browser will handle displaying the file inline
+
+            console.log(`[VIEW] ✅ Successfully serving ${metadata.filename} for viewing (${fileBuffer.length} bytes)`);
+            return res.send(fileBuffer);
+        } else {
+            // Fallback to old method if no MinIO URL (legacy records)
+            const result = await backend.downloadRecord(req.auth.userId, req.auth.org, recordId);
+            res.setHeader('Content-Type', result.metadata.mime_type || 'application/octet-stream');
+            res.setHeader('Content-Disposition', `inline; filename="${result.metadata.filename}"`); // inline instead of attachment
+            res.setHeader('Content-Length', result.file.length);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            return res.send(result.file);
+        }
+    } catch (err) {
+        console.error('View error:', err.message);
+        return res.status(500).json({ error: 'View failed', message: err.message });
     }
 });
 
