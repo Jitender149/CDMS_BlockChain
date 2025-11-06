@@ -18,7 +18,7 @@ export const ROUTES = [
     element: DashboardPage,
     label: "Dashboard",
     icon: Activity,
-    roles: ["admin", "district_police", "forensics_officer", "investigator"],
+    roles: ["admin", "district_police", "forensics_officer", "investigator", "judiciary"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -34,7 +34,7 @@ export const ROUTES = [
     element: AuditPage,
     label: "Audit Trail",
     icon: Database,
-    roles: ["admin", "district_police", "forensics_officer", "investigator"],
+    roles: ["admin", "district_police", "forensics_officer", "investigator", "judiciary"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -63,7 +63,7 @@ export const ROUTES = [
     element: RecordsPage,
     label: "Records",
     icon: FileText,
-    roles: ["admin", "district_police", "forensics_officer", "investigator"],
+    roles: ["admin", "district_police", "forensics_officer", "investigator", "judiciary"],
     showInSidebar: true, // Show in Sidebar
   },
   {
@@ -79,7 +79,7 @@ export const ROUTES = [
     element: BlockHistoryPage,
     label: "Block History",
     icon: Blocks,
-    roles: ["admin", "district_police", "forensics_officer", "investigator"],
+    roles: ["admin", "district_police", "forensics_officer", "investigator", "judiciary"],
     showInSidebar: true, // Show in Sidebar
   },
 ];

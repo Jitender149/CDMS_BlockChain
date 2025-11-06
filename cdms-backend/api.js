@@ -144,6 +144,11 @@ app.post('/register', async (req, res) => {
             return res.status(400).json({ error: 'All fields required: username, email, password, role, org' });
         }
 
+        // Judiciary can only register for OrgB
+        if (role === 'judiciary' && org !== 'B') {
+            return res.status(400).json({ error: 'Judiciary can only register for Organization B' });
+        }
+
         const pending = loadJSON(PENDING_REG_PATH);
         const approved = loadJSON(APPROVED_PATH);
 
@@ -323,7 +328,12 @@ app.post('/approve-registration', async (req, res) => {
         console.log(`Admin ${adminEmail} approving user ${user.username} (${user.role}) for ${user.org}...`);
 
         // Register based on org and role
-        // Roles: district_police, forensics_officer, investigator, admin
+        // Roles: district_police, forensics_officer, investigator, admin, judiciary
+        // Judiciary can only register for OrgB
+        if (user.role === 'judiciary' && user.org !== 'B') {
+            throw new Error('Judiciary can only register for Organization B');
+        }
+        
         if (user.org === 'A') {
             if (user.role === 'forensics_officer' || user.role === 'forensicsOfficerA') {
                 await registerForensicsOfficerA(user.username, user.email);
@@ -339,7 +349,8 @@ app.post('/approve-registration', async (req, res) => {
                 await registerForensicsOfficerB(user.username, user.email);
             } else if (user.role === 'investigator' || user.role === 'investigatorB') {
                 await registerInvestigatorB(user.username, user.email);
-            } else if (user.role === 'admin' || user.role === 'district_police' || user.role === 'districtPoliceB') {
+            } else if (user.role === 'admin' || user.role === 'district_police' || user.role === 'districtPoliceB' || user.role === 'judiciary') {
+                // Judiciary uses the same registration function as district_police for OrgB
                 await registerDistrictPoliceB(user.username, user.email);
             } else {
                 throw new Error(`Unknown role: ${user.role}`);

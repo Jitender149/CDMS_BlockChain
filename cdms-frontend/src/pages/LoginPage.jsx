@@ -91,8 +91,8 @@ const LoginPage = () => {
                   required
                 >
                   <option value="">Select Organization</option>
-                  <option value="A">District Police A</option>
-                  <option value="B">District Police B</option>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
                 </select>
               </div>
 

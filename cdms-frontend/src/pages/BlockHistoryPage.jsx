@@ -516,9 +516,9 @@ const BlockHistoryPage = ({ user }) => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       {item.value?.uploader_org === "A"
-                        ? "District Police A"
+                        ? "A"
                         : item.value?.uploader_org === "B"
-                        ? "District Police B"
+                        ? "B"
                         : item.value?.uploader_org || "N/A"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

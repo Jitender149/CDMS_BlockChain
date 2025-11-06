@@ -48,5 +48,14 @@
     "role": "admin",
     "org": "B",
     "walletId": "AdminOrg2"
+  },
+  {
+    "username": "judiciary",
+    "email": "judiciary@gmail.com",
+    "password": "$2b$10$QwAKy8uY0hNoh6F1PXA1L.HgACeshldBav3cyUKGvjmNev8QJk.Gu",
+    "role": "judiciary",
+    "org": "B",
+    "status": "pending",
+    "walletId": "judiciary"
   }
 ]

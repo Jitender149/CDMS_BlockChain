@@ -335,9 +335,9 @@ const RecordsPage = () => {
                     </td>
                     <td className="py-4 px-4 text-sm text-gray-600">
                       {record.uploader_org === "A" 
-                        ? "District Police A" 
+                        ? "A" 
                         : record.uploader_org === "B"
-                        ? "District Police B"
+                        ? "B"
                         : record.uploader_org || 'N/A'}
                     </td>
                     <td className="py-4 px-4 text-sm text-gray-600">

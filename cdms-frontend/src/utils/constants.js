@@ -15,6 +15,8 @@ export const USER_ROLES = {
   ADMIN: 'admin',
   INVESTIGATOR: 'investigator',
   FORENSICS_OFFICER: 'forensics_officer',
+  DISTRICT_POLICE: 'district_police',
+  JUDICIARY: 'judiciary',
   OBSERVER: 'Observer'
 };
 

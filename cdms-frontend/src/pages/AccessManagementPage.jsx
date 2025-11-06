@@ -486,7 +486,7 @@ const AccessManagementPage = ({ user }) => {
                                 </span>
                               </td>
                               <td className="py-4 px-4 text-sm text-gray-600">
-                                District Police {u.org}
+                                {u.org}
                               </td>
                               <td className="py-4 px-4">
                                 {getStatusBadge(u.status || 'active')}

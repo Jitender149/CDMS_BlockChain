@@ -40,12 +40,13 @@ const RegisterPage = () => {
     { value: "district_police", label: "District Police" },
     { value: "investigator", label: "Investigator" },
     { value: "forensics_officer", label: "Forensics Officer" },
+    { value: "judiciary", label: "Judiciary" },
   ];
 
   // Organizations
   const organizations = [
-    { value: "A", label: "District Police A" },
-    { value: "B", label: "District Police B" },
+    { value: "A", label: "A" },
+    { value: "B", label: "B" },
   ];
 
   const validateForm = () => {
@@ -93,16 +94,30 @@ const RegisterPage = () => {
       newErrors.org = "Please select an organization";
     }
 
+    // Judiciary can only register for OrgB
+    if (formData.role === "judiciary" && formData.org !== "B") {
+      newErrors.org = "Judiciary can only register for Organization B";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        [name]: value,
+      };
+      
+      // Auto-set org to B if judiciary is selected
+      if (name === "role" && value === "judiciary") {
+        updated.org = "B";
+      }
+      
+      return updated;
+    });
 
     // Clear error for this field when user starts typing
     if (errors[name]) {
@@ -363,17 +378,25 @@ const RegisterPage = () => {
                     name="org"
                     value={formData.org}
                     onChange={handleChange}
+                    disabled={formData.role === "judiciary"} // Disable org selection for judiciary (auto-set to B)
                     className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                       errors.org ? "border-red-500" : "border-gray-300"
-                    }`}
+                    } ${formData.role === "judiciary" ? "bg-gray-100 cursor-not-allowed" : ""}`}
                   >
                     <option value="">Select organization</option>
-                    {organizations.map((org) => (
-                      <option key={org.value} value={org.value}>
-                        {org.label}
-                      </option>
-                    ))}
+                    {organizations
+                      .filter(org => formData.role !== "judiciary" || org.value === "B") // Filter: judiciary only sees B
+                      .map((org) => (
+                        <option key={org.value} value={org.value}>
+                          {org.label}
+                        </option>
+                      ))}
                   </select>
+                  {formData.role === "judiciary" && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Judiciary can only register for Organization B
+                    </p>
+                  )}
                   {errors.org && (
                     <p className="text-red-500 text-sm mt-1">{errors.org}</p>
                   )}

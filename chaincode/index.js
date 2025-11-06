@@ -26,6 +26,10 @@ class CDMSContract extends Contract {
         console.info('============= START : Create Record ===========');
         
         const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
+        // Explicitly deny judiciary (read-only access)
+        if (callerRole === 'judiciary') {
+            throw new Error('CreateRecord: Judiciary has read-only access');
+        }
         // Only district_police and admin can upload/create records
         if (!this._isAllowed(callerRole, ['district_police', 'admin'])) {
             throw new Error(`CreateRecord: caller not authorized (must be district_police or admin). Got role: ${callerRole || 'null'}`);
@@ -97,8 +101,8 @@ class CDMSContract extends Contract {
         }
 
         const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
-        // All roles can view/access records
-        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin'])) {
+        // All roles can view/access records (including judiciary - read-only)
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
             throw new Error(`ReadRecord: caller not authorized. Got role: ${callerRole || 'null'}`);
         }
 
@@ -133,9 +137,13 @@ class CDMSContract extends Contract {
         }
 
         const callerRole = this._getClientAttr(ctx, 'role');
-        // Only district_police and admin can update records
+        // Only district_police and admin can update records (judiciary is read-only)
         if (!this._isAllowed(callerRole, ['district_police', 'admin'])) {
             throw new Error('UpdateRecord: caller not authorized (district_police/admin only)');
+        }
+        // Explicitly deny judiciary
+        if (callerRole === 'judiciary') {
+            throw new Error('UpdateRecord: Judiciary has read-only access');
         }
 
         const exists = await this.RecordExists(ctx, recordId);
@@ -239,9 +247,9 @@ class CDMSContract extends Contract {
             throw new Error('QueryRecordsByCase: caseId is required');
         }
 
-        const callerRole = this._getClientAttr(ctx, 'role');
-        // All roles can query records
-        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin'])) {
+        const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
+        // All roles can query records (including judiciary - read-only)
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
             throw new Error('QueryRecordsByCase: caller not authorized');
         }
 
@@ -273,8 +281,8 @@ class CDMSContract extends Contract {
     // -----------------------
     async ListAllRecords(ctx) {
         const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
-        // All roles can list records
-        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin'])) {
+        // All roles can list records (including judiciary - read-only)
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
             console.warn(`ListAllRecords: Role check failed. Role: ${callerRole || 'null'}, allowing in test mode`);
             // Don't throw error in test mode - allow the query to proceed
             // throw new Error(`ListAllRecords: caller not authorized. Got role: ${callerRole || 'null'}`);
@@ -436,8 +444,8 @@ class CDMSContract extends Contract {
         }
 
         const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
-        // All roles can view audit trail
-        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin'])) {
+        // All roles can view audit trail (including judiciary - read-only)
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
             console.warn(`GetAuditTrail: Role check failed. Role: ${callerRole || 'null'}, allowing in test mode`);
             // Don't throw error in test mode - allow the query to proceed
         }
@@ -463,8 +471,8 @@ class CDMSContract extends Contract {
         }
 
         const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
-        // All roles can view record history
-        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin'])) {
+        // All roles can view record history (including judiciary - read-only)
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
             console.warn(`GetRecordHistory: Role check failed. Role: ${callerRole || 'null'}, allowing in test mode`);
             // Don't throw error in test mode - allow the query to proceed
         }
@@ -535,8 +543,8 @@ class CDMSContract extends Contract {
         console.log('============= START : Get All History ===========');
 
         const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
-        // All roles can view all history
-        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin'])) {
+        // All roles can view all history (including judiciary - read-only)
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
             console.warn(`GetAllHistory: Role check failed. Role: ${callerRole || 'null'}, allowing in test mode`);
             // Don't throw error in test mode - allow the query to proceed
             // throw new Error(`GetAllHistory: caller not authorized. Got role: ${callerRole || 'null'}`);
