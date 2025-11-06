@@ -73,15 +73,15 @@ Fabric Gateway SDK
     ↓
 ┌─────────────────────────────────────────┐
 │        PEER ENDORSEMENT PROCESS         │
-│  ┌──────────┐      ┌──────────┐        │
-│  │Peer Org1 │      │Peer Org2 │        │
-│  │  Endorse │  →   │  Endorse │        │
-│  └────┬─────┘      └────┬─────┘        │
-│       │                 │              │
-│       └────────┬─────────┘              │
+│  ┌──────────┐      ┌──────────┐         │
+│  │Peer Org1 │      │Peer Org2 │         │
+│  │  Endorse │  →   │  Endorse │         │
+│  └────┬─────┘      └────┬─────┘         │
+│       │                 │               │
+│       └────────┬────────┘               │
 │                │                        │
-│         Endorsement Policy               │
-│         Check (Both Orgs)                │
+│         Endorsement Policy              │
+│         Check (Both Orgs)               │
 └─────────────────┬───────────────────────┘
                   ↓
           Orderer Service

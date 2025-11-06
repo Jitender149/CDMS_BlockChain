@@ -57,5 +57,14 @@
     "org": "B",
     "status": "pending",
     "walletId": "judiciary"
+  },
+  {
+    "username": "abc",
+    "email": "abc@gmail.com",
+    "password": "$2b$10$CwaUYl1/fv60CmlQ/fA0Au9Z0.Z2/M7qQ4BM4w3f4399GDpLJnUUO",
+    "role": "district_police",
+    "org": "A",
+    "status": "pending",
+    "walletId": "abc"
   }
 ]
