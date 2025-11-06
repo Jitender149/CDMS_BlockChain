@@ -1,3 +1,5 @@
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Database,
   FileText,
@@ -9,77 +11,172 @@ import {
   XCircle,
   AlertTriangle,
   Search,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth.jsx";
 
+const API_URL = import.meta.env.VITE_APP_API_URL || 'http://localhost:3000';
+
 const DashboardPage = () => {
-  const { user } = useAuth();
-  const stats = [
+  const { user: authUser } = useAuth();
+  const navigate = useNavigate();
+  const [stats, setStats] = useState([
     {
       label: "Total Records",
-      value: "1,247",
+      value: "0",
       icon: Database,
       color: "bg-blue-500",
     },
     {
-      label: "Active Cases",
-      value: "89",
-      icon: FileText,
+      label: "Total Users",
+      value: "0",
+      icon: Users,
       color: "bg-green-500",
     },
-    {
-      label: "Pending Reviews",
-      value: "23",
-      icon: Clock,
-      color: "bg-yellow-500",
-    },
-    {
-      label: "Audit Events",
-      value: "5,632",
-      icon: Activity,
-      color: "bg-purple-500",
-    },
-  ];
+  ]);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const recentActivity = [
-    {
-      action: "Record Uploaded",
-      user: "Officer Smith",
-      record: "FIR-2025-001",
-      time: "10 mins ago",
-      status: "success",
-    },
-    {
-      action: "Access Granted",
-      user: "Det. Johnson",
-      record: "EV-2025-089",
-      time: "25 mins ago",
-      status: "success",
-    },
-    {
-      action: "Access Denied",
-      user: "Unknown User",
-      record: "SR-2025-045",
-      time: "1 hour ago",
-      status: "error",
-    },
-    {
-      action: "Policy Updated",
-      user: "Admin Chen",
-      record: "Policy-123",
-      time: "2 hours ago",
-      status: "warning",
-    },
-  ];
+  useEffect(() => {
+    fetchDashboardData();
+  }, [authUser]);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      if (!authUser) {
+        throw new Error("User not authenticated");
+      }
+
+      const authHeader = `Bearer ${authUser.email}:${authUser.org}`;
+
+      // Fetch stats
+      const statsResponse = await fetch(`${API_URL}/dashboard/stats`, {
+        headers: {
+          'Authorization': authHeader
+        }
+      });
+
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        if (statsData.success) {
+          setStats([
+            {
+              label: "Total Records",
+              value: statsData.stats.totalRecords.toLocaleString(),
+              icon: Database,
+              color: "bg-blue-500",
+            },
+            {
+              label: "Total Users",
+              value: statsData.stats.totalUsers.toLocaleString(),
+              icon: Users,
+              color: "bg-green-500",
+            },
+          ]);
+        }
+      }
+
+      // Fetch recent activity
+      const activityResponse = await fetch(`${API_URL}/dashboard/activity?limit=5`, {
+        headers: {
+          'Authorization': authHeader
+        }
+      });
+
+      if (activityResponse.ok) {
+        const activityData = await activityResponse.json();
+        if (activityData.success) {
+          const formattedActivity = activityData.activity.map(event => {
+            const timeAgo = getTimeAgo(event.time);
+            let actionLabel = event.action;
+            let recordLabel = event.targetUser ? `${event.targetUser} (${event.targetUserOrg})` : '';
+            
+            // Format action labels
+            switch (event.action) {
+              case 'LOGIN':
+                actionLabel = 'User Logged In';
+                recordLabel = `${event.user} (${event.org})`;
+                break;
+              case 'LOGOUT':
+                actionLabel = 'User Logged Out';
+                recordLabel = `${event.user} (${event.org})`;
+                break;
+              case 'USER_APPROVED':
+                actionLabel = 'User Approved';
+                recordLabel = event.targetUser ? `${event.targetUser} (${event.targetUserOrg})` : '';
+                break;
+              case 'ACCESS_REVOKED':
+                actionLabel = 'Access Revoked';
+                recordLabel = event.targetUser ? `${event.targetUser} (${event.targetUserOrg})` : '';
+                break;
+              case 'ACCESS_RESTORED':
+                actionLabel = 'Access Restored';
+                recordLabel = event.targetUser ? `${event.targetUser} (${event.targetUserOrg})` : '';
+                break;
+              case 'VIEW':
+                actionLabel = 'File Viewed';
+                recordLabel = event.details || '';
+                break;
+              case 'CreateRecord':
+                actionLabel = 'Record Uploaded';
+                recordLabel = event.details || '';
+                break;
+              default:
+                actionLabel = event.action;
+                recordLabel = event.details || '';
+            }
+            
+            return {
+              action: actionLabel,
+              user: event.user,
+              org: event.org,
+              record: recordLabel,
+              time: timeAgo,
+              status: event.status,
+            };
+          });
+          setRecentActivity(formattedActivity);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getTimeAgo = (timestamp) => {
+    if (!timestamp) return 'Unknown';
+    
+    const now = new Date();
+    const time = new Date(timestamp);
+    const diffInSeconds = Math.floor((now - time) / 1000);
+    
+    if (diffInSeconds < 60) return `${diffInSeconds} seconds ago`;
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} mins ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    return `${Math.floor(diffInSeconds / 86400)} days ago`;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <span className="ml-3 text-gray-600">Loading dashboard...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Welcome back, {user.name}</p>
+        <p className="text-gray-600 mt-1">Welcome back, {authUser?.username || authUser?.email || 'User'}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {stats.map((stat, idx) => (
           <div
             key={idx}
@@ -108,7 +205,13 @@ const DashboardPage = () => {
             Recent Activity
           </h2>
           <div className="space-y-4">
-            {recentActivity.map((activity, idx) => (
+            {recentActivity.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Activity className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p>No recent activity</p>
+              </div>
+            ) : (
+              recentActivity.map((activity, idx) => (
               <div
                 key={idx}
                 className="flex items-start space-x-4 pb-4 border-b last:border-b-0"
@@ -140,7 +243,7 @@ const DashboardPage = () => {
                   <p className="text-xs text-gray-400 mt-1">{activity.time}</p>
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </div>
 
@@ -149,22 +252,34 @@ const DashboardPage = () => {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 gap-4">
-            <button className="p-4 border-2 border-blue-200 rounded-lg hover:bg-blue-50 transition text-left">
+            <button 
+              onClick={() => navigate('/upload')}
+              className="p-4 border-2 border-blue-200 rounded-lg hover:bg-blue-50 transition text-left cursor-pointer"
+            >
               <Upload className="w-8 h-8 text-blue-600 mb-2" />
               <p className="font-semibold text-gray-900">Upload Record</p>
               <p className="text-xs text-gray-500">Add new criminal data</p>
             </button>
-            <button className="p-4 border-2 border-green-200 rounded-lg hover:bg-green-50 transition text-left">
+            <button 
+              onClick={() => navigate('/records')}
+              className="p-4 border-2 border-green-200 rounded-lg hover:bg-green-50 transition text-left cursor-pointer"
+            >
               <Search className="w-8 h-8 text-green-600 mb-2" />
               <p className="font-semibold text-gray-900">Search Records</p>
               <p className="text-xs text-gray-500">Find case files</p>
             </button>
-            <button className="p-4 border-2 border-purple-200 rounded-lg hover:bg-purple-50 transition text-left">
+            <button 
+              onClick={() => navigate('/audit')}
+              className="p-4 border-2 border-purple-200 rounded-lg hover:bg-purple-50 transition text-left cursor-pointer"
+            >
               <Activity className="w-8 h-8 text-purple-600 mb-2" />
               <p className="font-semibold text-gray-900">Audit Trail</p>
               <p className="text-xs text-gray-500">View all activities</p>
             </button>
-            <button className="p-4 border-2 border-orange-200 rounded-lg hover:bg-orange-50 transition text-left">
+            <button 
+              onClick={() => navigate('/access-management')}
+              className="p-4 border-2 border-orange-200 rounded-lg hover:bg-orange-50 transition text-left cursor-pointer"
+            >
               <Users className="w-8 h-8 text-orange-600 mb-2" />
               <p className="font-semibold text-gray-900">Manage Access</p>
               <p className="text-xs text-gray-500">Control permissions</p>

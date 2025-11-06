@@ -575,9 +575,48 @@ class CDMSContract extends Contract {
                     const recordKey = result.value.key;
                     console.log(`Processing record key: ${recordKey}`);
 
-                    // Skip policy and audit keys
+                    // Skip policy and audit keys (but include SYSTEM_EVENT_ keys)
                     if (recordKey.startsWith('POLICY_') || recordKey.startsWith('AUDIT_')) {
                         console.log(`Skipping ${recordKey}`);
+                        result = await iterator.next();
+                        continue;
+                    }
+                    
+                    // Handle system events separately
+                    if (recordKey.startsWith('SYSTEM_EVENT_')) {
+                        try {
+                            const eventStr = Buffer.from(result.value.value.toString()).toString('utf8');
+                            const systemEvent = JSON.parse(eventStr);
+                            
+                            // Format system event as history entry
+                            const historyEntry = {
+                                txId: systemEvent.tx_id || `SYSTEM_${systemEvent.event_id}`,
+                                recordId: systemEvent.event_id,
+                                timestamp: systemEvent.timestamp,
+                                isDelete: false,
+                                action: systemEvent.event_type,
+                                actor: systemEvent.actor,
+                                actor_org: systemEvent.actor_org,
+                                actor_role: systemEvent.actor_role,
+                                target_user: systemEvent.target_user || null,
+                                target_user_org: systemEvent.target_user_org || null,
+                                details: systemEvent.details,
+                                value: {
+                                    event_type: systemEvent.event_type,
+                                    actor: systemEvent.actor,
+                                    actor_org: systemEvent.actor_org,
+                                    target_user: systemEvent.target_user,
+                                    target_user_org: systemEvent.target_user_org,
+                                    details: systemEvent.details
+                                },
+                                source: 'system_event'
+                            };
+                            
+                            allRecords.push(historyEntry);
+                            processedCount++;
+                        } catch (eventErr) {
+                            console.error(`Error parsing system event ${recordKey}: ${eventErr.message}`);
+                        }
                         result = await iterator.next();
                         continue;
                     }
@@ -686,8 +725,11 @@ class CDMSContract extends Contract {
                 }
             });
 
-            console.log(`============= END : Get All History (${allRecords.length} entries) ===========`);
-            return JSON.stringify(allRecords);
+            // Limit results
+            const limitedResults = allRecords.slice(0, limit);
+            
+            console.log(`============= END : Get All History (${limitedResults.length} of ${allRecords.length} entries) ===========`);
+            return JSON.stringify(limitedResults);
 
         } catch (err) {
             console.error('Error in GetAllHistory:', err);
@@ -786,6 +828,145 @@ class CDMSContract extends Contract {
         }
         
         return allowedArray.includes(roleValue);
+    }
+
+    // -----------------------
+    // LogSystemEvent
+    // -----------------------
+    /**
+     * Log system events (login, logout, user approval, access grant/revoke/restore)
+     * @param {Context} ctx - Transaction context
+     * @param {string} eventType - Type of event (LOGIN, LOGOUT, USER_APPROVED, ACCESS_GRANTED, ACCESS_REVOKED, ACCESS_RESTORED)
+     * @param {string} actor - User who performed the action (name)
+     * @param {string} actorOrg - User's organization (A or B)
+     * @param {string} details - Additional details about the event
+     * @param {string} targetUser - Target user (for approval/access operations, optional)
+     * @param {string} targetUserOrg - Target user's organization (optional)
+     */
+    async LogSystemEvent(ctx, eventType, actor, actorOrg, details, targetUser, targetUserOrg) {
+        console.info(`============= START : Log System Event ===========`);
+        console.info(`Event Type: ${eventType}, Actor: ${actor}, Org: ${actorOrg}`);
+        
+        const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
+        
+        // System events are allowed for all authenticated users
+        // No role check needed - these are logging operations
+        
+        const systemEvent = {
+            event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            event_type: eventType,
+            actor: actor || this._getClientId(ctx),
+            actor_org: actorOrg,
+            actor_role: callerRole,
+            target_user: targetUser || null,
+            target_user_org: targetUserOrg || null,
+            timestamp: new Date().toISOString(),
+            details: details || '',
+            tx_id: ctx.stub.getTxID()
+        };
+        
+        // Store system event
+        await ctx.stub.putState(systemEvent.event_id, Buffer.from(JSON.stringify(systemEvent)));
+        
+        // Emit event
+        ctx.stub.setEvent('SystemEvent', Buffer.from(JSON.stringify({
+            event_type: eventType,
+            actor: systemEvent.actor,
+            actor_org: systemEvent.actor_org
+        })));
+        
+        console.info(`============= END : Log System Event ===========`);
+        return systemEvent.event_id;
+    }
+
+    // -----------------------
+    // GetSystemEvents
+    // -----------------------
+    /**
+     * Get system events (for dashboard activity feed)
+     * @param {Context} ctx - Transaction context
+     * @param {string} limit - Maximum number of events to return (default: 100)
+     */
+    async GetSystemEvents(ctx, limitParam) {
+        console.info(`============= START : Get System Events ===========`);
+        
+        const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
+        // All roles can view system events
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
+            console.warn(`GetSystemEvents: Role check failed. Role: ${callerRole || 'null'}, allowing in test mode`);
+        }
+        
+        try {
+            const limit = limitParam ? parseInt(limitParam) : 100;
+            const events = [];
+            
+            // Query all SYSTEM_EVENT keys
+            const iterator = await ctx.stub.getStateByRange('', '\uffff');
+            let result = await iterator.next();
+            
+            while (!result.done && events.length < limit) {
+                try {
+                    if (result.value && result.value.key && result.value.key.startsWith('SYSTEM_EVENT_')) {
+                        const eventStr = Buffer.from(result.value.value.toString()).toString('utf8');
+                        const event = JSON.parse(eventStr);
+                        events.push(event);
+                    }
+                } catch (err) {
+                    console.warn(`Error parsing system event: ${err.message}`);
+                }
+                result = await iterator.next();
+            }
+            
+            await iterator.close();
+            
+            // Sort by timestamp (most recent first)
+            events.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            console.info(`============= END : Get System Events (found ${events.length}) ===========`);
+            return JSON.stringify(events.slice(0, limit));
+        } catch (err) {
+            console.error(`Error getting system events: ${err.message}`);
+            throw err;
+        }
+    }
+
+    // -----------------------
+    // GetRecordCount
+    // -----------------------
+    /**
+     * Get total number of records in the ledger
+     */
+    async GetRecordCount(ctx) {
+        console.info(`============= START : Get Record Count ===========`);
+        
+        const callerRole = this._getClientAttr(ctx, 'role') || this._deriveRoleFromClientId(ctx);
+        // All roles can get record count
+        if (!this._isAllowed(callerRole, ['district_police', 'investigator', 'forensics_officer', 'admin', 'judiciary'])) {
+            console.warn(`GetRecordCount: Role check failed. Role: ${callerRole || 'null'}, allowing in test mode`);
+        }
+        
+        try {
+            let count = 0;
+            const iterator = await ctx.stub.getStateByRange('', '\uffff');
+            let result = await iterator.next();
+            
+            while (!result.done) {
+                // Count only record keys (exclude AUDIT_, SYSTEM_EVENT_, POLICY_)
+                const key = result.value.key;
+                if (!key.startsWith('AUDIT_') && !key.startsWith('SYSTEM_EVENT_') && !key.startsWith('POLICY_')) {
+                    count++;
+                }
+                result = await iterator.next();
+            }
+            
+            await iterator.close();
+            
+            console.info(`============= END : Get Record Count (${count}) ===========`);
+            return JSON.stringify({ count });
+        } catch (err) {
+            console.error(`Error getting record count: ${err.message}`);
+            throw err;
+        }
     }
 
     // -----------------------

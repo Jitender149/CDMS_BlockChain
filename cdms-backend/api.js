@@ -26,6 +26,7 @@ const registerDistrictPoliceB = require('./registerDistrictPoliceB');
 const PENDING_REG_PATH = path.join(__dirname, 'pending_registrations.json');
 const APPROVED_PATH = path.join(__dirname, 'approved_users.json');
 const UPLOADS_FALLBACK_PATH = path.join(__dirname, 'uploads_fallback.json');
+const SYSTEM_EVENTS_FALLBACK_PATH = path.join(__dirname, 'system_events_fallback.json');
 
 // =========================================================
 // Utility Helpers
@@ -56,6 +57,7 @@ function saveJSON(filepath, map) {
 if (!fs.existsSync(PENDING_REG_PATH)) fs.writeFileSync(PENDING_REG_PATH, '[]');
 if (!fs.existsSync(APPROVED_PATH)) fs.writeFileSync(APPROVED_PATH, '[]');
 if (!fs.existsSync(UPLOADS_FALLBACK_PATH)) fs.writeFileSync(UPLOADS_FALLBACK_PATH, '[]');
+if (!fs.existsSync(SYSTEM_EVENTS_FALLBACK_PATH)) fs.writeFileSync(SYSTEM_EVENTS_FALLBACK_PATH, '[]');
 
 // Helper functions for upload fallback storage
 function loadUploadsFallback() {
@@ -71,6 +73,24 @@ function saveUploadFallback(uploadData) {
     const uploads = loadUploadsFallback();
     uploads.push(uploadData);
     fs.writeFileSync(UPLOADS_FALLBACK_PATH, JSON.stringify(uploads, null, 2));
+}
+
+// Helper functions for system events storage (local only, no blockchain)
+function loadSystemEventsFallback() {
+    if (!fs.existsSync(SYSTEM_EVENTS_FALLBACK_PATH)) return [];
+    try {
+        return JSON.parse(fs.readFileSync(SYSTEM_EVENTS_FALLBACK_PATH, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+
+function saveSystemEventFallback(eventData) {
+    const events = loadSystemEventsFallback();
+    events.push(eventData);
+    // Keep only last 1000 events to prevent file from growing too large
+    const recentEvents = events.slice(-1000);
+    fs.writeFileSync(SYSTEM_EVENTS_FALLBACK_PATH, JSON.stringify(recentEvents, null, 2));
 }
 
 // Helper function to group transactions into blocks for testing
@@ -252,6 +272,27 @@ app.post('/login', async (req, res) => {
             throw fabricError;
         }
 
+        // Log login event to local storage
+        try {
+            const eventData = {
+                event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                event_type: 'LOGIN',
+                actor: foundUser.username,
+                actor_org: foundUser.org,
+                actor_role: foundUser.role,
+                target_user: null,
+                target_user_org: null,
+                timestamp: new Date().toISOString(),
+                details: `User ${foundUser.username} logged in from ${foundUser.org}`,
+                tx_id: `LOGIN_${Date.now()}`,
+                source: 'system_event'
+            };
+            saveSystemEventFallback(eventData);
+            console.log(`[LOGIN] ✅ Logged login event to local storage for ${foundUser.username}`);
+        } catch (logErr) {
+            console.warn('[LOGIN] Failed to log login event to local storage:', logErr.message);
+        }
+
         return res.json({
             success: true,
             message: 'Login successful',
@@ -272,6 +313,50 @@ app.post('/login', async (req, res) => {
             message: errorMessage,
             stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
         });
+    }
+});
+
+// =========================================================
+// Logout Endpoint
+// =========================================================
+app.post('/logout', authenticateUser, async (req, res) => {
+    try {
+        const { username, org } = req.body;
+        const actorName = username || req.auth.userId || req.auth.email;
+        const actorOrg = org || req.auth.org;
+        
+        // Log logout event to local storage
+        try {
+            const approvedUsers = loadJSON(APPROVED_PATH);
+            const userEmail = req.headers.authorization?.replace('Bearer ', '').split(':')[0];
+            const user = approvedUsers.get(userEmail);
+            
+            const eventData = {
+                event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                event_type: 'LOGOUT',
+                actor: actorName,
+                actor_org: actorOrg,
+                actor_role: user?.role || null,
+                target_user: null,
+                target_user_org: null,
+                timestamp: new Date().toISOString(),
+                details: `User ${actorName} logged out from ${actorOrg}`,
+                tx_id: `LOGOUT_${Date.now()}`,
+                source: 'system_event'
+            };
+            saveSystemEventFallback(eventData);
+            console.log(`[LOGOUT] ✅ Logged logout event to local storage for ${actorName}`);
+        } catch (logErr) {
+            console.warn('[LOGOUT] Failed to log logout event to local storage:', logErr.message);
+        }
+        
+        return res.json({
+            success: true,
+            message: 'Logout successful'
+        });
+    } catch (err) {
+        console.error('Logout error:', err);
+        return res.status(500).json({ error: 'Logout failed', message: err.message });
     }
 });
 
@@ -371,6 +456,27 @@ app.post('/approve-registration', async (req, res) => {
         saveJSON(APPROVED_PATH, approvedFinal);
         saveJSON(PENDING_REG_PATH, pending);
 
+        // Log user approval event to local storage
+        try {
+            const eventData = {
+                event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                event_type: 'USER_APPROVED',
+                actor: admin.username || admin.email,
+                actor_org: admin.org,
+                actor_role: admin.role,
+                target_user: user.username,
+                target_user_org: user.org,
+                timestamp: new Date().toISOString(),
+                details: `User ${user.username} approved and enrolled in Fabric`,
+                tx_id: `USER_APPROVED_${Date.now()}`,
+                source: 'system_event'
+            };
+            saveSystemEventFallback(eventData);
+            console.log(`[APPROVE] ✅ Logged user approval event to local storage for ${user.username}`);
+        } catch (logErr) {
+            console.warn('[APPROVE] Failed to log approval event to local storage:', logErr.message);
+        }
+
         return res.json({
             success: true,
             message: `User ${user.username} approved and enrolled in Fabric (${user.org}). Use your email and password to log in.`,
@@ -456,6 +562,27 @@ app.post('/revoke-access', async (req, res) => {
         approved.set(email, user);
         saveJSON(APPROVED_PATH, approved);
 
+        // Log access revocation event to local storage
+        try {
+            const eventData = {
+                event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                event_type: 'ACCESS_REVOKED',
+                actor: admin.username || admin.email,
+                actor_org: admin.org,
+                actor_role: admin.role,
+                target_user: user.username,
+                target_user_org: user.org,
+                timestamp: new Date().toISOString(),
+                details: `Access revoked for user ${user.username}. Reason: ${reason || 'Not specified'}`,
+                tx_id: `ACCESS_REVOKED_${Date.now()}`,
+                source: 'system_event'
+            };
+            saveSystemEventFallback(eventData);
+            console.log(`[REVOKE] ✅ Logged access revocation event to local storage for ${user.username}`);
+        } catch (logErr) {
+            console.warn('[REVOKE] Failed to log revocation event to local storage:', logErr.message);
+        }
+
         return res.json({
             success: true,
             message: `Access revoked for user ${user.username}.`,
@@ -505,6 +632,27 @@ app.post('/restore-access', async (req, res) => {
 
         approved.set(email, user);
         saveJSON(APPROVED_PATH, approved);
+
+        // Log access restoration event to local storage
+        try {
+            const eventData = {
+                event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                event_type: 'ACCESS_RESTORED',
+                actor: admin.username || admin.email,
+                actor_org: admin.org,
+                actor_role: admin.role,
+                target_user: user.username,
+                target_user_org: user.org,
+                timestamp: new Date().toISOString(),
+                details: `Access restored for user ${user.username}`,
+                tx_id: `ACCESS_RESTORED_${Date.now()}`,
+                source: 'system_event'
+            };
+            saveSystemEventFallback(eventData);
+            console.log(`[RESTORE] ✅ Logged access restoration event to local storage for ${user.username}`);
+        } catch (logErr) {
+            console.warn('[RESTORE] Failed to log restoration event to local storage:', logErr.message);
+        }
 
         return res.json({
             success: true,
@@ -716,29 +864,55 @@ app.post('/record/upload', upload.single('file'), authenticateUser, async (req, 
                 // both orgs, transactions may need explicit peer specification.
                 await contract.submitTransaction('CreateRecord', JSON.stringify(recordData));
 
-                console.log(`[UPLOAD] ✅ Record ${recordId} created on blockchain`);
+               console.log(`[UPLOAD] ✅ Record ${recordId} created on blockchain`);
 
-                // Step 5: Add audit entry
-                try {
-                    await contract.submitTransaction(
-                        'AddAudit',
-                        recordId,
-                        req.auth.userId,  // Keep actual user ID in audit trail
-                        'UPLOAD',
-                        `File uploaded: ${req.file.originalname} (${minioResult.size} bytes, hash: ${minioResult.hash.substring(0, 16)}...)`
-                    );
-                    
-                    // Update fallback to mark as blockchain recorded
-                    uploadFallbackData.blockchainRecorded = true;
-                    const uploads = loadUploadsFallback();
-                    const index = uploads.findIndex(u => u.record_id === recordId && u.timestamp === uploadFallbackData.timestamp);
-                    if (index >= 0) {
-                        uploads[index] = uploadFallbackData;
-                        fs.writeFileSync(UPLOADS_FALLBACK_PATH, JSON.stringify(uploads, null, 2));
-                    }
-                } catch (auditErr) {
-                    console.warn('[UPLOAD] Failed to add audit entry:', auditErr.message);
-                }
+               // Step 5: Add audit entry
+               try {
+                   await contract.submitTransaction(
+                       'AddAudit',
+                       recordId,
+                       req.auth.userId,  // Keep actual user ID in audit trail
+                       'UPLOAD',
+                       `File uploaded: ${req.file.originalname} (${minioResult.size} bytes, hash: ${minioResult.hash.substring(0, 16)}...)`
+                   );
+                   
+                   // Update fallback to mark as blockchain recorded
+                   uploadFallbackData.blockchainRecorded = true;
+                   const uploads = loadUploadsFallback();
+                   const index = uploads.findIndex(u => u.record_id === recordId && u.timestamp === uploadFallbackData.timestamp);
+                   if (index >= 0) {
+                       uploads[index] = uploadFallbackData;
+                       fs.writeFileSync(UPLOADS_FALLBACK_PATH, JSON.stringify(uploads, null, 2));
+                   }
+               } catch (auditErr) {
+                   console.warn('[UPLOAD] Failed to add audit entry:', auditErr.message);
+               }
+
+               // Step 6: Log system event for upload (local storage only)
+               try {
+                   const approvedUsers = loadJSON(APPROVED_PATH);
+                   const userEmail = req.headers.authorization?.replace('Bearer ', '').split(':')[0];
+                   const user = approvedUsers.get(userEmail);
+                   if (user) {
+                       const eventData = {
+                           event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                           event_type: 'UPLOAD',
+                           actor: user.username || user.email,
+                           actor_org: user.org,
+                           actor_role: user.role,
+                           target_user: null,
+                           target_user_org: null,
+                           timestamp: new Date().toISOString(),
+                           details: `File uploaded: ${req.file.originalname} (${minioResult.size} bytes) - Record: ${recordId}`,
+                           tx_id: `UPLOAD_${Date.now()}`,
+                           source: 'system_event'
+                       };
+                       saveSystemEventFallback(eventData);
+                       console.log(`[UPLOAD] ✅ Logged upload event to local storage for ${user.username}`);
+                   }
+               } catch (logErr) {
+                   console.warn('[UPLOAD] Failed to log upload event to local storage:', logErr.message);
+               }
 
                 await gateway.disconnect();
                 blockchainSuccess = true;
@@ -819,6 +993,27 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
                 console.warn('[DOWNLOAD] Failed to add audit entry:', auditErr.message);
             }
             
+            // Log system event for download (local storage only)
+            try {
+                const eventData = {
+                    event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    event_type: 'DOWNLOAD',
+                    actor: user.username || user.email,
+                    actor_org: user.org,
+                    actor_role: user.role,
+                    target_user: null,
+                    target_user_org: null,
+                    timestamp: new Date().toISOString(),
+                    details: `File downloaded: ${metadata.filename || recordId}`,
+                    tx_id: `DOWNLOAD_${Date.now()}`,
+                    source: 'system_event'
+                };
+                saveSystemEventFallback(eventData);
+                console.log(`[DOWNLOAD] ✅ Logged download event to local storage for ${user.username}`);
+            } catch (logErr) {
+                console.warn('[DOWNLOAD] Failed to log download event to local storage:', logErr.message);
+            }
+            
             await gateway.disconnect();
         } catch (blockchainErr) {
             console.warn('[DOWNLOAD] Blockchain query failed, trying fallback:', blockchainErr.message);
@@ -832,6 +1027,32 @@ app.get('/record/:id/download', authenticateUser, async (req, res) => {
                 console.log(`[DOWNLOAD] Using fallback metadata for record ${recordId}`);
             } else {
                 throw new Error('Record not found in blockchain or local storage');
+            }
+            
+            // Log system event for download (even when using fallback)
+            try {
+                const approvedUsers = loadJSON(APPROVED_PATH);
+                const userEmail = req.headers.authorization?.replace('Bearer ', '').split(':')[0];
+                const user = approvedUsers.get(userEmail);
+                if (user && metadata) {
+                    const eventData = {
+                        event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        event_type: 'DOWNLOAD',
+                        actor: user.username || user.email,
+                        actor_org: user.org,
+                        actor_role: user.role,
+                        target_user: null,
+                        target_user_org: null,
+                        timestamp: new Date().toISOString(),
+                        details: `File downloaded: ${metadata.filename || recordId}`,
+                        tx_id: `DOWNLOAD_${Date.now()}`,
+                        source: 'system_event'
+                    };
+                    saveSystemEventFallback(eventData);
+                    console.log(`[DOWNLOAD] ✅ Logged download event to local storage for ${user.username}`);
+                }
+            } catch (logErr) {
+                console.warn('[DOWNLOAD] Failed to log download event to local storage:', logErr.message);
             }
         }
         
@@ -896,6 +1117,32 @@ app.get('/record/:id/view', authenticateUser, async (req, res) => {
                 console.warn('[VIEW] Failed to add audit entry:', auditErr.message);
             }
             
+            // Log system event for view (local storage only)
+            try {
+                const approvedUsers = loadJSON(APPROVED_PATH);
+                const userEmail = req.headers.authorization?.replace('Bearer ', '').split(':')[0];
+                const user = approvedUsers.get(userEmail);
+                if (user) {
+                    const eventData = {
+                        event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        event_type: 'VIEW',
+                        actor: user.username || user.email,
+                        actor_org: user.org,
+                        actor_role: user.role,
+                        target_user: null,
+                        target_user_org: null,
+                        timestamp: new Date().toISOString(),
+                        details: `File viewed: ${metadata.filename || recordId}`,
+                        tx_id: `VIEW_${Date.now()}`,
+                        source: 'system_event'
+                    };
+                    saveSystemEventFallback(eventData);
+                    console.log(`[VIEW] ✅ Logged view event to local storage for ${user.username}`);
+                }
+            } catch (logErr) {
+                console.warn('[VIEW] Failed to log view event to local storage:', logErr.message);
+            }
+            
             await gateway.disconnect();
         } catch (blockchainErr) {
             console.warn('[VIEW] Blockchain query failed, trying fallback:', blockchainErr.message);
@@ -909,6 +1156,32 @@ app.get('/record/:id/view', authenticateUser, async (req, res) => {
                 console.log(`[VIEW] Using fallback metadata for record ${recordId}`);
             } else {
                 throw new Error('Record not found in blockchain or local storage');
+            }
+            
+            // Log system event for view (even when using fallback)
+            try {
+                const approvedUsers = loadJSON(APPROVED_PATH);
+                const userEmail = req.headers.authorization?.replace('Bearer ', '').split(':')[0];
+                const user = approvedUsers.get(userEmail);
+                if (user && metadata) {
+                    const eventData = {
+                        event_id: `SYSTEM_EVENT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        event_type: 'VIEW',
+                        actor: user.username || user.email,
+                        actor_org: user.org,
+                        actor_role: user.role,
+                        target_user: null,
+                        target_user_org: null,
+                        timestamp: new Date().toISOString(),
+                        details: `File viewed: ${metadata.filename || recordId}`,
+                        tx_id: `VIEW_${Date.now()}`,
+                        source: 'system_event'
+                    };
+                    saveSystemEventFallback(eventData);
+                    console.log(`[VIEW] ✅ Logged view event to local storage for ${user.username}`);
+                }
+            } catch (logErr) {
+                console.warn('[VIEW] Failed to log view event to local storage:', logErr.message);
             }
         }
         
@@ -1371,8 +1644,9 @@ app.get('/block-history', authenticateUser, async (req, res) => {
             }
         }
         
-        // Fallback: Try chaincode queries (GetAllHistory, ListAllRecords)
+        // Fallback: Try chaincode queries (GetAllHistory, ListAllRecords, GetSystemEvents)
         let blockchainHistory = [];
+        let systemEvents = [];
         let fallbackHistory = [];
         
         try {
@@ -1381,35 +1655,116 @@ app.get('/block-history', authenticateUser, async (req, res) => {
             
             try {
                 console.log('[BLOCK HISTORY] Attempting to call GetAllHistory...');
-                const result = await contract.evaluateTransaction('GetAllHistory', limit.toString());
+                const result = await contract.evaluateTransaction('GetAllHistory', (limit * 2).toString()); // Get more to include system events
                 blockchainHistory = JSON.parse(result.toString());
                 console.log(`[BLOCK HISTORY] Successfully retrieved ${blockchainHistory.length} history entries from blockchain`);
-            } catch (methodErr) {
-                console.warn('[BLOCK HISTORY] GetAllHistory method not available, trying ListAllRecords');
                 
+                // Separate system events from record history
+                const recordHistory = blockchainHistory.filter(h => h.source !== 'system_event');
+                systemEvents = blockchainHistory.filter(h => h.source === 'system_event');
+                
+                // Combine and sort by timestamp
+                blockchainHistory = [...recordHistory, ...systemEvents].sort((a, b) => {
+                    const dateA = new Date(a.timestamp || 0);
+                    const dateB = new Date(b.timestamp || 0);
+                    return dateB - dateA; // Newest first
+                }).slice(0, limit);
+                
+                console.log(`[BLOCK HISTORY] Combined: ${recordHistory.length} records + ${systemEvents.length} system events = ${blockchainHistory.length} total`);
+            } catch (methodErr) {
+                console.warn('[BLOCK HISTORY] GetAllHistory method not available, trying individual queries');
+                
+                // Try to get system events separately
                 try {
+                    const systemEventsResult = await contract.evaluateTransaction('GetSystemEvents', limit.toString());
+                    systemEvents = JSON.parse(systemEventsResult.toString());
+                    console.log(`[BLOCK HISTORY] Retrieved ${systemEvents.length} system events`);
+                } catch (systemErr) {
+                    console.warn('[BLOCK HISTORY] GetSystemEvents failed:', systemErr.message);
+                }
+                
+                // Try ListAllRecords
+                try {
+                    console.log('[BLOCK HISTORY] Trying ListAllRecords...');
                     const recordsResult = await contract.evaluateTransaction('ListAllRecords');
                     const records = JSON.parse(recordsResult.toString());
                     
-                    blockchainHistory = records.map(record => ({
+                    const recordHistory = records.map(record => ({
                         txId: `BLOCKCHAIN_${record.record_id || record.id}`,
                         recordId: record.record_id || record.id,
                         timestamp: record.created_at || record.updated_at || new Date().toISOString(),
                         isDelete: false,
-                        action: 'CREATE',
+                        action: 'CreateRecord',
                         actor: record.uploader_id || 'SYSTEM',
+                        actor_org: record.uploader_org || record.org,
                         value: {
                             record_id: record.record_id || record.id,
                             case_id: record.case_id,
                             record_type: record.record_type,
-                            uploader_org: record.uploader_org || record.org
+                            uploader_org: record.uploader_org || record.org,
+                            filename: record.filename || null
                         },
                         source: 'blockchain'
-                    })).slice(0, limit);
+                    }));
                     
-                    console.log(`[BLOCK HISTORY] Fallback: Created ${blockchainHistory.length} entries from current records`);
+                    // Format system events
+                    const formattedSystemEvents = systemEvents.map(event => ({
+                        txId: event.tx_id || `SYSTEM_${event.event_id}`,
+                        recordId: event.event_id,
+                        timestamp: event.timestamp,
+                        isDelete: false,
+                        action: event.event_type,
+                        actor: event.actor,
+                        actor_org: event.actor_org,
+                        actor_role: event.actor_role,
+                        target_user: event.target_user || null,
+                        target_user_org: event.target_user_org || null,
+                        details: event.details,
+                        value: {
+                            event_type: event.event_type,
+                            actor: event.actor,
+                            actor_org: event.actor_org,
+                            target_user: event.target_user,
+                            target_user_org: event.target_user_org,
+                            details: event.details
+                        },
+                        source: 'system_event'
+                    }));
+                    
+                    // Combine and sort
+                    blockchainHistory = [...recordHistory, ...formattedSystemEvents].sort((a, b) => {
+                        const dateA = new Date(a.timestamp || 0);
+                        const dateB = new Date(b.timestamp || 0);
+                        return dateB - dateA; // Newest first
+                    }).slice(0, limit);
+                    
+                    console.log(`[BLOCK HISTORY] Fallback: Created ${recordHistory.length} records + ${formattedSystemEvents.length} system events = ${blockchainHistory.length} total`);
                 } catch (listErr) {
                     console.warn('[BLOCK HISTORY] ListAllRecords also failed:', listErr.message);
+                    // If we have system events, use them
+                    if (systemEvents.length > 0) {
+                        blockchainHistory = systemEvents.map(event => ({
+                            txId: event.tx_id || `SYSTEM_${event.event_id}`,
+                            recordId: event.event_id,
+                            timestamp: event.timestamp,
+                            isDelete: false,
+                            action: event.event_type,
+                            actor: event.actor,
+                            actor_org: event.actor_org,
+                            target_user: event.target_user || null,
+                            target_user_org: event.target_user_org || null,
+                            details: event.details,
+                            value: {
+                                event_type: event.event_type,
+                                actor: event.actor,
+                                actor_org: event.actor_org,
+                                target_user: event.target_user,
+                                target_user_org: event.target_user_org,
+                                details: event.details
+                            },
+                            source: 'system_event'
+                        }));
+                    }
                 }
             }
             
@@ -1432,6 +1787,31 @@ app.get('/block-history', authenticateUser, async (req, res) => {
             blockchainRecorded: upload.blockchainRecorded || false
         }));
         
+        // Get system events from local storage
+        const systemEventsLocal = loadSystemEventsFallback();
+        const systemEventsHistory = systemEventsLocal.map(event => ({
+            txId: event.tx_id || `SYSTEM_${event.event_id}`,
+            recordId: event.event_id,
+            timestamp: event.timestamp,
+            isDelete: false,
+            action: event.event_type,
+            actor: event.actor,
+            actor_org: event.actor_org,
+            actor_role: event.actor_role,
+            target_user: event.target_user || null,
+            target_user_org: event.target_user_org || null,
+            details: event.details,
+            value: {
+                event_type: event.event_type,
+                actor: event.actor,
+                actor_org: event.actor_org,
+                target_user: event.target_user,
+                target_user_org: event.target_user_org,
+                details: event.details
+            },
+            source: 'system_event'
+        }));
+        
         // If we have real blocks, return them
         if (realBlocks.length > 0) {
             return res.json({
@@ -1445,13 +1825,22 @@ app.get('/block-history', authenticateUser, async (req, res) => {
             });
         }
         
-        // Otherwise, combine chaincode history and fallback
+        // Otherwise, combine chaincode history, fallback uploads, and system events
         const combinedHistory = [...blockchainHistory];
         const blockchainTxIds = new Set(blockchainHistory.map(h => h.txId));
         
+        // Add fallback uploads (avoid duplicates)
         fallbackHistory.forEach(fallback => {
             if (!blockchainTxIds.has(fallback.txId)) {
                 combinedHistory.push(fallback);
+            }
+        });
+        
+        // Add system events from local storage (avoid duplicates)
+        const allTxIds = new Set(combinedHistory.map(h => h.txId));
+        systemEventsHistory.forEach(event => {
+            if (!allTxIds.has(event.txId)) {
+                combinedHistory.push(event);
             }
         });
         
@@ -1553,6 +1942,132 @@ app.get('/certificates/orderer', async (req, res) => {
             error: 'Failed to get orderer certificate',
             message: err.message
         });
+    }
+});
+
+// =========================================================
+// Dashboard Statistics Endpoints
+// =========================================================
+
+// Get Dashboard Stats (Total Records, Total Users)
+app.get('/dashboard/stats', authenticateUser, async (req, res) => {
+    try {
+        const adminId = getAdminIdentity(req.auth.org);
+        const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
+        
+        // Get total records from blockchain
+        let totalRecords = 0;
+        try {
+            const result = await contract.evaluateTransaction('GetRecordCount');
+            const countData = JSON.parse(result.toString());
+            totalRecords = countData.count || 0;
+        } catch (err) {
+            console.warn('[DASHBOARD] Failed to get record count from blockchain:', err.message);
+            // Fallback: count from local storage
+            const fallbackUploads = loadUploadsFallback();
+            totalRecords = fallbackUploads.length;
+        }
+        
+        // Get total users from approved_users.json
+        const approvedUsers = loadJSON(APPROVED_PATH);
+        const totalUsers = approvedUsers.size || 0;
+        
+        await gateway.disconnect();
+        
+        return res.json({
+            success: true,
+            stats: {
+                totalRecords,
+                totalUsers
+            }
+        });
+    } catch (err) {
+        console.error('[DASHBOARD] Error getting stats:', err.message);
+        return res.status(500).json({ error: 'Failed to get dashboard stats', message: err.message });
+    }
+});
+
+// Get Recent Activity (5 most recent system events)
+app.get('/dashboard/activity', authenticateUser, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || 5);
+        
+        // Get system events from local storage
+        const systemEvents = loadSystemEventsFallback();
+        
+        // Sort by timestamp (newest first) and limit
+        const recentEvents = systemEvents
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .slice(0, limit)
+            .map(event => ({
+                action: event.event_type,
+                user: event.actor,
+                org: event.actor_org,
+                targetUser: event.target_user || null,
+                targetUserOrg: event.target_user_org || null,
+                details: event.details,
+                time: event.timestamp,
+                status: 'success'
+            }));
+        
+        return res.json({
+            success: true,
+            activity: recentEvents,
+            count: recentEvents.length
+        });
+    } catch (err) {
+        console.error('Get dashboard activity error:', err.message);
+        return res.status(500).json({
+            error: 'Failed to get dashboard activity',
+            message: err.message
+        });
+    }
+});
+
+// Old dashboard activity endpoint (commented out - was using blockchain)
+app.get('/dashboard/activity-old', authenticateUser, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || 5);
+        const adminId = getAdminIdentity(req.auth.org);
+        const { contract, gateway } = await backend.getContract(adminId, req.auth.org);
+        
+        // Get system events from blockchain
+        let events = [];
+        try {
+            const result = await contract.evaluateTransaction('GetSystemEvents', limit.toString());
+            events = JSON.parse(result.toString());
+        } catch (err) {
+            console.warn('[DASHBOARD] Failed to get system events from blockchain:', err.message);
+            // Return empty array if blockchain query fails
+        }
+        
+        await gateway.disconnect();
+        
+        // Format events for frontend
+        const formattedEvents = events.map(event => ({
+            action: event.event_type,
+            user: event.actor,
+            org: event.actor_org,
+            targetUser: event.target_user || null,
+            targetUserOrg: event.target_user_org || null,
+            time: event.timestamp,
+            details: event.details,
+            status: event.event_type === 'LOGIN' || event.event_type === 'USER_APPROVED' || event.event_type === 'ACCESS_RESTORED' 
+                ? 'success' 
+                : event.event_type === 'LOGOUT' 
+                ? 'info' 
+                : event.event_type === 'ACCESS_REVOKED' 
+                ? 'error' 
+                : 'warning'
+        }));
+        
+        return res.json({
+            success: true,
+            activity: formattedEvents.slice(0, limit)
+        });
+    } catch (err) {
+        console.error('[DASHBOARD] Error getting activity:', err.message);
+        return res.status(500).json({ error: 'Failed to get recent activity', message: err.message });
     }
 });
 
